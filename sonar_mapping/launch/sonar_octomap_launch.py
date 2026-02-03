@@ -1,8 +1,15 @@
 import os
+from launch.actions import DeclareLaunchArgument
 from launch import LaunchDescription
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 def generate_launch_description():
+    log_level_arg = DeclareLaunchArgument(
+        'log_level',
+        default_value='info',
+        description='Logging level (debug, info, warn, error, fatal)'
+    )
     return LaunchDescription([
         Node(
             package='sonar_mapping',
@@ -18,7 +25,9 @@ def generate_launch_description():
                 'vertical_fov': 20.0,
                 'min_intensity_short_range': 0.4,
                 'min_intensity_long_range': 0.2,
-            }]
+                'use_sim_time': True,
+            }],
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
         Node(
             package='octomap_server',
@@ -41,6 +50,7 @@ def generate_launch_description():
                 'sensor_model/miss': 0.4,          # Default is 0.4
                 'sensor_model/min': 0.12,
                 'sensor_model/max': 0.97,
+                'use_sim_time': True,
                 
                 # filtering
                 'filter_ground': False,            # Set True only if you want to remove the sea floor
