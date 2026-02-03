@@ -38,6 +38,8 @@ public:
         this->declare_parameter("min_intensity_long_range", 0.2); // Minimum intensity threshold for long range
         this->declare_parameter("horizontal_fov", 130.0); // Horizontal field of view in degrees
         this->declare_parameter("vertical_fov", 20.0); // Vertical field of view in degrees
+        this->declare_parameter("filter_window_size", 7); // Window size s (must be even, s+1 total beams)
+        this->declare_parameter("filter_distance_threshold", 0.5); // Max average distance threshold in meters
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
@@ -47,7 +49,15 @@ public:
         min_intensity_long_range_ = this->get_parameter("min_intensity_long_range").as_double();
         h_fov_ = this->get_parameter("horizontal_fov").as_double() * M_PI / 180.0;
         v_fov_ = this->get_parameter("vertical_fov").as_double() * M_PI / 180.0;
+        filter_window_size_ = this->get_parameter("filter_window_size").as_int();
+        filter_distance_threshold_ = this->get_parameter("filter_distance_threshold").as_double();
 
+        // Ensure window size is even
+        if (filter_window_size_ % 2 != 0) {
+            RCLCPP_WARN(this->get_logger(), "Filter window size must be even, adjusting %d to %d",
+                        filter_window_size_, filter_window_size_ + 1);
+            filter_window_size_++;
+        }
 
         // Create transformation matrix from sonar_link to base_link
         // Translation: (0.3, 0.0, 0.3)
@@ -56,12 +66,12 @@ public:
 
         // TODO: check qos
         rclcpp::QoS qos_profile(1);
-        qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
+        qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
         qos_profile.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
         point_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("sonar_point_cloud", qos_profile);
 
-        rclcpp::QoS qos(10);
-        qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
+        rclcpp::QoS qos(1);
+        qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
         qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
         sonar_subscriber_ = this->create_subscription<sensor_msgs::msg::Image>(
             sonar_topic, qos,
@@ -87,7 +97,6 @@ private:
     // message_filters::Subscriber<geometry_msgs::msg::PoseStamped> pose_subscriber_;
     // std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<
     //     sensor_msgs::msg::Image, geometry_msgs::msg::PoseStamped>>> sync;
-    pcl::PointCloud<pcl::PointXYZ> cloud_;
     Eigen::Matrix4f sonar_to_baselink_transform_;
     double resolution_;
     double max_range_;
@@ -95,6 +104,61 @@ private:
     double min_intensity_long_range_;
     double h_fov_;
     double v_fov_;
+    int filter_window_size_;
+    double filter_distance_threshold_;
+
+    pcl::PointCloud<pcl::PointXYZ> filterPointCloud(
+        const std::vector<std::vector<pcl::PointXYZ>>& points_by_beam) {
+        pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
+
+        int num_beams = points_by_beam.size();
+        
+        if (num_beams == 0) {
+            return filtered_cloud;
+        }
+
+        int half_window = filter_window_size_ / 2;
+
+        // Process each beam
+        for (int i = 0; i < num_beams; i++) {
+            const auto& beam_points = points_by_beam[i];
+            
+            // Process each point in the beam
+            for (const auto& focus_point : beam_points) {
+                // Calculate window boundaries
+                int start_beam = std::max(0, i - half_window);
+                int end_beam = std::min(num_beams - 1, i + half_window);
+                
+                // Compute average distance to surrounding points
+                double sum_distances = 0.0;
+                int count = 0;
+                
+                for (int j = start_beam; j <= end_beam; j++) {
+                    for (const auto& neighbor_point : points_by_beam[j]) {
+                        // Calculate Euclidean distance (equation 54)
+                        double dx = focus_point.x - neighbor_point.x;
+                        double dy = focus_point.y - neighbor_point.y;
+                        double dz = focus_point.z - neighbor_point.z;
+                        double distance = std::sqrt(dx*dx + dy*dy + dz*dz);
+                        
+                        sum_distances += distance;
+                        count++;
+                    }
+                }
+                
+                // Calculate average distance d_i^f = (1/(s+1)) * sum of distances
+                double avg_distance = (count > 0) ? sum_distances / count : 0.0;
+                
+                // Keep point if average distance is below threshold
+                // For present objects, feature points should be close to each other
+                if (avg_distance <= filter_distance_threshold_) {
+                    filtered_cloud.push_back(focus_point);
+                }
+            }
+        }
+        
+        return filtered_cloud;
+    }
 
     void createSonarToBaseLinkTransform(double tx, double ty, double tz,
                                         double roll_deg, double pitch_deg, double yaw_deg) {
@@ -145,11 +209,9 @@ private:
         int rows = sonar_image.rows;
         int cols = sonar_image.cols;
 
-        RCLCPP_INFO(this->get_logger(), "Processing sonar image: %dx%d", cols, rows);
+        RCLCPP_DEBUG(this->get_logger(), "Processing sonar image: %dx%d", cols, rows);
 
-        // Clear previous cloud
-        cloud_.clear();
-        cloud_.header.frame_id = "sonar_link";
+        std::vector<std::vector<pcl::PointXYZ>> points_by_beam(cols);
 
         // M750d produces 2D range-bearing data at constant depth
         for (int r = 0; r < rows; r++) {
@@ -169,59 +231,51 @@ private:
                 // Assuming center column is 0 degrees, spreading across h_fov
                 double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
 
-                // Convert to 3D Cartesian coordinates (equation 3.7)
-                // x = r * cos(theta)  - forward direction
-                // y = r * sin(theta)  - lateral direction
-                // z = depth           - robot's current depth (constant for this ping)
-
                 // Frame: X=Forward, Y=Left, Z=Up
                 double x = range * cos(bearing);
                 double y = range * sin(bearing);
                 double z = 0.0; // Assuming flat plane at sonar depth
 
-                // Calculate in "optical" frame
-                // Frame: X=Right, Y=Up, -Z=Forward
-                // double x_opt = range * sin(bearing);   // Right
-                // double y_opt = 0.0;                    // Up
-                // double z_opt = -range * cos(bearing);  // Forward is -Z
-
-
-                // double x = -z_opt; // Forward
-                // double y = -x_opt; // Left = -Right
-                // double z = y_opt;  // Up = Up
-
-                // Transform to "sonar_link" frame
-                // Frame: X=Right, Y=Up, -Z=Forward
-                // double x = y_opt;
-                // double y = z_opt;
-                // double z = -x_opt;
-
-                // Apply voxel grid filtering (simple decimation)
-                int voxel_x = static_cast<int>(x / resolution_);
-                int voxel_y = static_cast<int>(y / resolution_);
-                int voxel_z = static_cast<int>(z / resolution_);
-
-                // Snap to voxel center
                 pcl::PointXYZ point;
-                point.x = (voxel_x + 0.5) * resolution_;
-                point.y = (voxel_y + 0.5) * resolution_;
-                point.z = (voxel_z + 0.5) * resolution_;
+                point.x = x;
+                point.y = y;
+                point.z = z;
 
-                cloud_.push_back(point);
+                points_by_beam[c].push_back(point);
             }
         }
 
+        // Count total points before filtering
+        size_t total_points_before = 0;
+        for (const auto& beam : points_by_beam) {
+            total_points_before += beam.size();
+        }
+
+        pcl::PointCloud<pcl::PointXYZ> cloud = filterPointCloud(points_by_beam);
+        cloud.header.frame_id = "sonar_link";
+
+        RCLCPP_DEBUG(this->get_logger(), "Filtered cloud from %zu beams to %zu points", points_by_beam.size(), cloud.size());
+
+        size_t points_after = cloud.size();
+        size_t points_removed = total_points_before - points_after;
+        double filter_percentage = total_points_before > 0 ? 
+            (100.0 * points_removed / total_points_before) : 0.0;
+
+        RCLCPP_DEBUG(this->get_logger(), 
+                    "Filtering: %zu points before -> %zu points after (removed %zu points, %.1f%%)",
+                    total_points_before, points_after, points_removed, filter_percentage);
+
         // Publish point cloud with same timestamp as input image
-        if (!cloud_.empty()) {
+        if (!cloud.empty()) {
             pcl::PointCloud<pcl::PointXYZ> cloud_baselink;
-            pcl::transformPointCloud(cloud_, cloud_baselink, sonar_to_baselink_transform_);
+            pcl::transformPointCloud(cloud, cloud_baselink, sonar_to_baselink_transform_);
             sensor_msgs::msg::PointCloud2 output_msg;
             pcl::toROSMsg(cloud_baselink, output_msg);
             output_msg.header.frame_id = "base_link";
-            output_msg.header.stamp = img_msg->header.stamp; // Use original timestamp
+            output_msg.header.stamp = this->now(); //img_msg->header.stamp;
 
             point_cloud_pub_->publish(output_msg);
-            RCLCPP_INFO(this->get_logger(), "Published point cloud with %zu points", cloud_.size());
+            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", cloud.size());
         } else {
             RCLCPP_WARN(this->get_logger(), "Point cloud is empty, nothing to publish.");
         }
