@@ -11,6 +11,21 @@ def generate_launch_description():
         description='Logging level (debug, info, warn, error, fatal)'
     )
     return LaunchDescription([
+        log_level_arg,
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            arguments=[
+                '--x', '0.3',
+                '--y', '0.0',
+                '--z', '0.3',
+                '--roll', '0.0',
+                '--pitch', '0.785398',  # 45 degrees in radians
+                '--yaw', '0.0',
+                '--frame-id', 'base_link',
+                '--child-frame-id', 'sonar_link'
+            ]
+        ),
         Node(
             package='sonar_mapping',
             executable='sonar_point_cloud',

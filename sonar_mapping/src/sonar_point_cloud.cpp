@@ -14,14 +14,9 @@
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 
-// #include "message_filters/subscriber.hpp"
-// #include "message_filters/synchronizer.hpp"
-// #include "message_filters/sync_policies/approximate_time.hpp"
-
 using namespace std::chrono_literals;
 
 using std::placeholders::_1;
-// using std::placeholders::_2;
 
 // TODO: use OculusPing message type
 
@@ -59,11 +54,6 @@ public:
             filter_window_size_++;
         }
 
-        // Create transformation matrix from sonar_link to base_link
-        // Translation: (0.3, 0.0, 0.3)
-        // Rotation: Roll=0°, Pitch=-45°, Yaw=-90°
-        createSonarToBaseLinkTransform(0.3, 0.0, 0.3, 0.0, 45.0, 0.0);
-
         // TODO: check qos
         rclcpp::QoS qos_profile(1);
         qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
@@ -77,27 +67,11 @@ public:
             sonar_topic, qos,
             std::bind(&SonarPointCloud::convertImageToPointCloud, this, _1)
         );
-        // sonar_subscriber_.subscribe(this, sonar_topic, qos.get_rmw_qos_profile());
-        // pose_subscriber_.subscribe(this, pose_topic, qos.get_rmw_qos_profile());
-
-        // uint32_t queue_size = 10;
-        // sync = std::make_shared<message_filters::Synchronizer<message_filters::sync_policies::
-        //     ApproximateTime<sensor_msgs::msg::Image, geometry_msgs::msg::PoseStamped>>>(
-        //     message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image,
-        //     geometry_msgs::msg::PoseStamped>(queue_size), sonar_subscriber_, pose_subscriber_);
-
-        // sync->setAgePenalty(0.50); // TODO: tune this value
-        // sync->registerCallback(std::bind(&SonarPointCloud::SyncCallback, this, _1, _2));
     }
 
 private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_pub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sonar_subscriber_;
-    // message_filters::Subscriber<sensor_msgs::msg::Image> sonar_subscriber_;
-    // message_filters::Subscriber<geometry_msgs::msg::PoseStamped> pose_subscriber_;
-    // std::shared_ptr<message_filters::Synchronizer<message_filters::sync_policies::ApproximateTime<
-    //     sensor_msgs::msg::Image, geometry_msgs::msg::PoseStamped>>> sync;
-    Eigen::Matrix4f sonar_to_baselink_transform_;
     double resolution_;
     double max_range_;
     double min_intensity_short_range_;
@@ -107,6 +81,19 @@ private:
     int filter_window_size_;
     double filter_distance_threshold_;
 
+    /**
+     * @brief Filters sonar features for noise and outliers using averaged point distances.
+     * * This method implements a moving window filter across consecutive sonar beams. 
+     * It assumes that feature points belonging to physical objects should be spatially 
+     * close across adjacent beams.
+     * * The average distance value for a focus point $f_i^S$ is calculated using a window 
+     * of size $s$ (totaling $s + 1$ consecutive beams):
+     * * $$\bar{d}_i^f = \frac{1}{s+1} \sum_{j=i-\frac{s}{2}}^{i+\frac{s}{2}} \sqrt{(f_{i_x}^S - f_{j_x}^S)^2 + (f_{i_y}^S - f_{j_y}^S)^2}$$
+     *
+     * @param points_by_beam A vector of vectors containing points organized by their respective laser beam index.
+     * @return pcl::PointCloud<pcl::PointXYZ> Filtered point cloud
+     * * @note Source: "ROV-Based Autonomous Maneuvering for Ship Hull Inspection with Coverage Monitoring" (Cardaillac, A. et al.) - Equations 54 and 55
+     */
     pcl::PointCloud<pcl::PointXYZ> filterPointCloud(
         const std::vector<std::vector<pcl::PointXYZ>>& points_by_beam) {
         pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
@@ -135,7 +122,7 @@ private:
                 
                 for (int j = start_beam; j <= end_beam; j++) {
                     for (const auto& neighbor_point : points_by_beam[j]) {
-                        // Calculate Euclidean distance (equation 54)
+                        // Calculate Euclidean distance
                         double dx = focus_point.x - neighbor_point.x;
                         double dy = focus_point.y - neighbor_point.y;
                         double dz = focus_point.z - neighbor_point.z;
@@ -159,41 +146,6 @@ private:
         
         return filtered_cloud;
     }
-
-    void createSonarToBaseLinkTransform(double tx, double ty, double tz,
-                                        double roll_deg, double pitch_deg, double yaw_deg) {
-        // Convert degrees to radians
-        double roll = roll_deg * M_PI / 180.0;
-        double pitch = pitch_deg * M_PI / 180.0;
-        double yaw = yaw_deg * M_PI / 180.0;
-
-        // Create rotation matrix using Eigen (ZYX euler angles - ROS convention)
-        Eigen::AngleAxisf rollAngle(roll, Eigen::Vector3f::UnitX());
-        Eigen::AngleAxisf pitchAngle(pitch, Eigen::Vector3f::UnitY());
-        Eigen::AngleAxisf yawAngle(yaw, Eigen::Vector3f::UnitZ());
-
-        Eigen::Quaternionf q = yawAngle * pitchAngle * rollAngle;
-        Eigen::Matrix3f rotation = q.matrix();
-
-        // Create 4x4 transformation matrix
-        sonar_to_baselink_transform_ = Eigen::Matrix4f::Identity();
-        sonar_to_baselink_transform_.block<3,3>(0,0) = rotation;
-        sonar_to_baselink_transform_(0,3) = tx;
-        sonar_to_baselink_transform_(1,3) = ty;
-        sonar_to_baselink_transform_(2,3) = tz;
-
-        RCLCPP_INFO(this->get_logger(), "Sonar to base_link transform created:");
-        RCLCPP_INFO(this->get_logger(), "Translation: [%.2f, %.2f, %.2f]", tx, ty, tz);
-        RCLCPP_INFO(this->get_logger(), "Rotation (RPY): [%.2f, %.2f, %.2f] deg", roll_deg, pitch_deg, yaw_deg);
-    }
-
-    // void SyncCallback(const sensor_msgs::msg::Image::ConstSharedPtr & sonar_data,
-    //                   const geometry_msgs::msg::PoseStamped::ConstSharedPtr & pose_data) {
-    //     RCLCPP_INFO(this->get_logger(), "Sync callback with %u and %u as times",
-    //     sonar_data->header.stamp.sec, pose_data->header.stamp.sec);
-
-    //     convertImageToPointCloud(sonar_data);
-    // }
 
     void convertImageToPointCloud(const sensor_msgs::msg::Image::ConstSharedPtr & img_msg) {
         // Convert ROS Image to OpenCV Mat
@@ -267,12 +219,10 @@ private:
 
         // Publish point cloud with same timestamp as input image
         if (!cloud.empty()) {
-            pcl::PointCloud<pcl::PointXYZ> cloud_baselink;
-            pcl::transformPointCloud(cloud, cloud_baselink, sonar_to_baselink_transform_);
             sensor_msgs::msg::PointCloud2 output_msg;
-            pcl::toROSMsg(cloud_baselink, output_msg);
-            output_msg.header.frame_id = "base_link";
-            output_msg.header.stamp = this->now(); //img_msg->header.stamp;
+            pcl::toROSMsg(cloud, output_msg);
+            output_msg.header.frame_id = "sonar_link";
+            output_msg.header.stamp = this->now();
 
             point_cloud_pub_->publish(output_msg);
             RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", cloud.size());
