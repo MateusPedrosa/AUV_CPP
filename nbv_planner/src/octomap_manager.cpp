@@ -110,6 +110,95 @@ void OctomapManager::castRay(
     }
 }
 
+// void OctomapManager::castRaySecondary(
+//     const octomap::point3d& sensor_origin,
+//     const octomap::point3d& point,
+//     octomap::KeySet* viewed_cells)
+// {
+//     if (viewed_cells == nullptr) {
+//         return;
+//     }
+
+//     // Determine the ray endpoint (clamp to max range if needed)
+//     octomap::point3d ray_end = point;
+//     double point_distance = (point - sensor_origin).norm();
+    
+//     if (params_.sensor_max_range > 0.0 && point_distance > params_.sensor_max_range) {
+//         ray_end = sensor_origin + (point - sensor_origin).normalized() * params_.sensor_max_range;
+//     }
+
+//     // Cast a ray to compute all the free cells.
+//     key_ray_secondary_.reset();
+//     if (octree_->computeRayKeys(sensor_origin, ray_end, key_ray_secondary_)) {
+//         if (params_.max_free_space == 0.0) {
+//             viewed_cells->insert(key_ray_secondary_.begin(), key_ray_secondary_.end());
+//         } else {
+//             for (const auto& key : key_ray_secondary_) {
+//                 octomap::point3d voxel_coordinate = octree_->keyToCoord(key);
+//                 double voxel_distance = (voxel_coordinate - sensor_origin).norm();
+//                 if (voxel_distance < params_.max_free_space ||
+//                     voxel_coordinate.z() > (sensor_origin.z() - params_.min_height_free_space)) {
+//                     viewed_cells->insert(key);
+//                 }
+//             }
+//         }
+//     }
+// }
+
+FrustumAngles OctomapManager::getCameraFOV(const CameraIntrinsics& intrinsics) const {
+    double fov_h = 2 * std::atan(intrinsics.width / (2.0 * intrinsics.fx));   // Horizontal
+    double fov_v = 2 * std::atan(intrinsics.height / (2.0 * intrinsics.fy));  // Vertical
+    return {fov_h, fov_v};
+}
+
+void OctomapManager::markFrustumAsViewed(
+    const Eigen::Isometry3d& T_G_sensor,
+    const double fov_h,
+    const double fov_v,
+    const double max_range)
+{
+    const octomap::point3d sensor_origin = pointEigenToOctomap(T_G_sensor.translation());
+    
+    double half_fov_h = fov_h / 2.0;   // Horizontal
+    double half_fov_v = fov_v / 2.0;  // Vertical
+    
+    // Sample rays across the frustum
+    const int horizontal_rays = 40;
+    const int vertical_rays = 30;
+    
+    for (int h = 0; h < horizontal_rays; ++h) {
+        for (int v = 0; v < vertical_rays; ++v) {
+            // Angular position within frustum
+            double angle_h = -half_fov_h + (2.0 * half_fov_h * h) / (horizontal_rays - 1);
+            double angle_v = -half_fov_v + (2.0 * half_fov_v * v) / (vertical_rays - 1);
+            
+            // Ray direction in sensor frame
+            double horizontal_offset = -std::tan(angle_h); // -Y is right
+            double vertical_offset = std::tan(angle_v);    // +Z is up
+            Eigen::Vector3d ray(1.0, horizontal_offset, vertical_offset);
+            ray.normalize();
+            
+            // Transform to world frame
+            Eigen::Vector3d ray_world = T_G_sensor.rotation() * ray;
+            Eigen::Vector3d endpoint_world = T_G_sensor.translation() + ray_world * max_range;
+            octomap::point3d endpoint_octo = pointEigenToOctomap(endpoint_world);
+            octomap::point3d ray_world_octo = pointEigenToOctomap(ray_world);
+            
+            // Cast ray and find where it hits occupied/unknown space
+            octomap::point3d ray_end;
+            bool hit_obstacle = octree_->castRay(sensor_origin, ray_world_octo, ray_end, false, max_range);
+            
+            // Mark all voxels along the ray as viewed (up to obstacle or max range)
+            octomap::point3d actual_end = hit_obstacle ? ray_end : endpoint_octo;
+            
+            key_ray_.reset();
+            if (octree_->computeRayKeys(sensor_origin, actual_end, key_ray_)) {
+                viewed_voxels_.insert(key_ray_.begin(), key_ray_.end());
+            }
+        }
+    }
+}
+
 void OctomapManager::updateOccupancy(
     octomap::KeySet* free_cells,
     octomap::KeySet* occupied_cells)
@@ -165,6 +254,20 @@ void OctomapManager::getMapBounds(octomap::point3d& min, octomap::point3d& max) 
     
     octree_->getMetricMax(x, y, z);
     max = octomap::point3d(x, y, z);
+}
+
+bool OctomapManager::isVoxelViewed(const octomap::OcTreeKey& key) const
+{
+    return viewed_voxels_.find(key) != viewed_voxels_.end();
+}
+
+bool OctomapManager::isPointViewed(const octomap::point3d& point) const
+{
+    octomap::OcTreeKey key;
+    if (octree_->coordToKeyChecked(point, key)) {
+        return isVoxelViewed(key);
+    }
+    return false;
 }
 
 } // namespace nbv_planner

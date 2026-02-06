@@ -27,6 +27,20 @@ def generate_launch_description():
             ]
         ),
         Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            arguments=[
+                '--x', '0.3',
+                '--y', '0.0',
+                '--z', '0.1',
+                '--roll', '1.5708',  # 90 degrees in radians
+                '--pitch', '0.0',
+                '--yaw', '0.0',
+                '--frame-id', 'base_link',
+                '--child-frame-id', 'camera_link'
+            ]
+        ),
+        Node(
             package='sonar_mapping',
             executable='sonar_point_cloud',
             name='sonar_point_cloud_node',

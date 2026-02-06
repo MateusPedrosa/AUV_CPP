@@ -33,7 +33,7 @@ def generate_launch_description():
     
     declare_sensor_range = DeclareLaunchArgument(
         'sensor_range',
-        default_value='3.0',
+        default_value='40.0',
         description='Maximum sensor range in meters'
     )
     
@@ -59,6 +59,54 @@ def generate_launch_description():
         'sensor_vfov',
         default_value=str(20.0 * 3.14159 / 180.0),  # 20 degrees in radians
         description='Sensor vertical field of view in radians'
+    )
+
+    declare_secondary_sensor_frame = DeclareLaunchArgument(
+        'secondary_sensor_frame',
+        default_value='camera_link',
+        description='Frame ID for the secondary sensor'
+    )
+
+    declare_camera_fx = DeclareLaunchArgument(
+        'camera_fx',
+        default_value='731.79',
+        description='Camera focal length in x'
+    )
+
+    declare_camera_fy = DeclareLaunchArgument(
+        'camera_fy',
+        default_value='731.79',
+        description='Camera focal length in y'
+    )
+
+    declare_camera_cx = DeclareLaunchArgument(
+        'camera_cx',
+        default_value='970.94',
+        description='Camera principal point x'
+    )
+
+    declare_camera_cy = DeclareLaunchArgument(
+        'camera_cy',
+        default_value='600.37',
+        description='Camera principal point y'
+    )
+
+    declare_camera_width = DeclareLaunchArgument(
+        'camera_width',
+        default_value='1216',
+        description='Camera image width'
+    )
+
+    declare_camera_height = DeclareLaunchArgument(
+        'camera_height',
+        default_value='1936',
+        description='Camera image height'
+    )
+
+    declare_camera_max_range = DeclareLaunchArgument(
+        'camera_max_range',
+        default_value='2.0',
+        description='Maximum range for camera sensor'
     )
 
     declare_min_height_free_space = DeclareLaunchArgument(
@@ -96,6 +144,14 @@ def generate_launch_description():
             'min_height_free_space': LaunchConfiguration('min_height_free_space'),
             'sensor_hfov': LaunchConfiguration('sensor_hfov'),
             'sensor_vfov': LaunchConfiguration('sensor_vfov'),
+            'secondary_sensor_frame': LaunchConfiguration('secondary_sensor_frame'),
+            'camera_fx': LaunchConfiguration('camera_fx'),
+            'camera_fy': LaunchConfiguration('camera_fy'),
+            'camera_cx': LaunchConfiguration('camera_cx'),
+            'camera_cy': LaunchConfiguration('camera_cy'),
+            'camera_width': LaunchConfiguration('camera_width'),
+            'camera_height': LaunchConfiguration('camera_height'),
+            'camera_max_range': LaunchConfiguration('camera_max_range'),
         }],
         remappings=[
             ('cloud_in', LaunchConfiguration('cloud_topic')),
@@ -124,6 +180,14 @@ def generate_launch_description():
         declare_min_height_free_space,
         declare_sensor_hfov,
         declare_sensor_vfov,
+        declare_secondary_sensor_frame,
+        declare_camera_fx,
+        declare_camera_fy,
+        declare_camera_cx,
+        declare_camera_cy,
+        declare_camera_width,
+        declare_camera_height,
+        declare_camera_max_range,
         declare_cloud_topic,
         declare_use_rviz,
         

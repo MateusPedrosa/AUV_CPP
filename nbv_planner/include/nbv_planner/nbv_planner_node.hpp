@@ -29,6 +29,8 @@ private:
     void publishCandidateMarkers();
 
     void publishFrustumMarker();
+
+    void publishSecondaryFrustumMarker();
     
     // Core components
     std::unique_ptr<OctomapManager> octomap_manager_;
@@ -40,6 +42,7 @@ private:
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr candidates_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr frustum_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr secondary_frustum_pub_;
     rclcpp::TimerBase::SharedPtr planning_timer_;
     
     // TF
@@ -51,6 +54,8 @@ private:
     std::string robot_frame_;
     std::string cloud_topic_;
     double planning_frequency_;
+    std::string secondary_sensor_frame_;
+    CameraIntrinsics camera_intrinsics_;
     
     // State
     geometry_msgs::msg::Pose current_pose_;

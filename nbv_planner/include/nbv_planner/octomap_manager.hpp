@@ -29,6 +29,18 @@ struct OctomapParameters {
     double clamping_thres_max = 0.97;
 };
 
+struct CameraIntrinsics {
+    double fx, fy;      // Focal lengths
+    double cx, cy;      // Principal point
+    int width, height;  // Image dimensions
+    double max_range;   // Maximum camera range
+};
+
+struct FrustumAngles {
+    double horizontal;
+    double vertical;
+};
+
 class OctomapManager {
 public:
     /**
@@ -81,6 +93,14 @@ public:
      */
     void getMapBounds(octomap::point3d& min, octomap::point3d& max) const;
 
+    FrustumAngles getCameraFOV(const CameraIntrinsics& intrinsics) const;
+
+    void markFrustumAsViewed(const Eigen::Isometry3d& T_G_sensor, const double fov_h, const double fov_v, const double max_range);
+
+    bool isPointViewed(const octomap::point3d& point) const;
+
+    bool isVoxelViewed(const octomap::OcTreeKey& key) const;
+
 private:
     void castRay(const octomap::point3d& sensor_origin, const octomap::point3d& point, octomap::KeySet* free_cells, octomap::KeySet* occupied_cells);
 
@@ -90,6 +110,10 @@ private:
     OctomapParameters params_;
 
     octomap::KeyRay key_ray_;
+    octomap::KeyRay key_ray_secondary_;
+
+    // Set of voxels viewed by the secondary sensor in the two sensors configuration (e.g. sonar + camera)
+    octomap::KeySet viewed_voxels_;
 };
 
 } // namespace nbv_planner

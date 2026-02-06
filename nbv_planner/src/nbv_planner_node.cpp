@@ -20,12 +20,32 @@ NBVPlannerNode::NBVPlannerNode()
     this->declare_parameter("min_height_free_space", 0.0);
     this->declare_parameter("sensor_hfov", 130.0 * M_PI / 180.0);
     this->declare_parameter("sensor_vfov", 20.0 * M_PI / 180.0); // 60 degrees
+    this->declare_parameter("secondary_sensor_frame", "camera_link");
+    this->declare_parameter("camera_fx", 525.0);
+    this->declare_parameter("camera_fy", 525.0);
+    this->declare_parameter("camera_cx", 319.5);
+    this->declare_parameter("camera_cy", 239.5);
+    this->declare_parameter("camera_width", 640);
+    this->declare_parameter("camera_height", 480);
+    this->declare_parameter("camera_max_range", 5.0);
     
     // Get parameters
     map_frame_ = this->get_parameter("map_frame").as_string();
     robot_frame_ = this->get_parameter("robot_frame").as_string();
     planning_frequency_ = this->get_parameter("planning_frequency").as_double();
+
+    secondary_sensor_frame_ = this->get_parameter("secondary_sensor_frame").as_string();
     
+    camera_intrinsics_ = {
+        this->get_parameter("camera_fx").as_double(),
+        this->get_parameter("camera_fy").as_double(),
+        this->get_parameter("camera_cx").as_double(),
+        this->get_parameter("camera_cy").as_double(),
+        static_cast<int>(this->get_parameter("camera_width").as_int()),
+        static_cast<int>(this->get_parameter("camera_height").as_int()),
+        this->get_parameter("camera_max_range").as_double()
+    };
+
     // Configure octomap parameters
     OctomapParameters octomap_params;
     octomap_params.resolution = this->get_parameter("octree_resolution").as_double();
@@ -64,6 +84,7 @@ NBVPlannerNode::NBVPlannerNode()
     candidates_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "candidate_markers", 10);
     frustum_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("sensor_frustum", 10);
+    secondary_frustum_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("secondary_sensor_frustum", 10);
     
     // Create timer for planning
     auto period = std::chrono::duration<double>(1.0 / planning_frequency_);
@@ -112,21 +133,64 @@ void NBVPlannerNode::publishFrustumMarker() {
     frustum_pub_->publish(marker);
 }
 
+void NBVPlannerNode::publishSecondaryFrustumMarker() {
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = secondary_sensor_frame_; // Use the actual sensor frame
+    marker.header.stamp = rclcpp::Time(0);
+    marker.frame_locked = true;
+    marker.ns = "frustum";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.scale.x = 0.02; // Line thickness
+
+    FrustumAngles frustum_angles = octomap_manager_->getCameraFOV(camera_intrinsics_);
+    float range = camera_intrinsics_.max_range;
+    float h_half = frustum_angles.horizontal / 2.0 * range;
+    float v_half = frustum_angles.vertical / 2.0 * range;
+
+    // Define the 5 points: Origin (0,0,0) and 4 corners of the far plane
+    geometry_msgs::msg::Point p0, p1, p2, p3, p4;
+    p0.x = 0; p0.y = 0; p0.z = 0;
+    p1.x = range; p1.y = h_half; p1.z = v_half;
+    p2.x = range; p2.y = -h_half; p2.z = v_half;
+    p3.x = range; p3.y = -h_half; p3.z = -v_half;
+    p4.x = range; p4.y = h_half; p4.z = -v_half;
+
+    // Add lines from origin to corners and connecting corners...
+    marker.points = {p0, p1, p0, p2, p0, p3, p0, p4, p1, p2, p2, p3, p3, p4, p4, p1};
+    marker.color.r = 0.0;
+    marker.color.g = 0.0;
+    marker.color.b = 1.0;
+    marker.color.a = 1.0;
+
+    secondary_frustum_pub_->publish(marker);
+}
+
 void NBVPlannerNode::pointCloudCallback(
     const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
     try {
         // Get transform from sensor to map frame
-        geometry_msgs::msg::TransformStamped transform_stamped;
-        transform_stamped = tf_buffer_->lookupTransform(
+        geometry_msgs::msg::TransformStamped transform_stamped_main_sensor;
+        transform_stamped_main_sensor = tf_buffer_->lookupTransform(
             map_frame_,
             msg->header.frame_id,
             msg->header.stamp,
             rclcpp::Duration::from_seconds(0.1));
         
         // Convert to Eigen transform
-        Eigen::Isometry3d T_G_sensor = tf2::transformToEigen(transform_stamped);
+        Eigen::Isometry3d T_G_sensor = tf2::transformToEigen(transform_stamped_main_sensor);
         
+        geometry_msgs::msg::TransformStamped transform_stamped_secondary_sensor;
+        transform_stamped_secondary_sensor = tf_buffer_->lookupTransform(
+            map_frame_,
+            secondary_sensor_frame_,
+            msg->header.stamp,
+            rclcpp::Duration::from_seconds(0.1));
+
+        Eigen::Isometry3d T_G_secondary_sensor = tf2::transformToEigen(transform_stamped_secondary_sensor);
+
         // Convert ROS PointCloud2 to PCL
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(
             new pcl::PointCloud<pcl::PointXYZ>());
@@ -134,6 +198,9 @@ void NBVPlannerNode::pointCloudCallback(
         
         // Update octree using batch ray casting
         octomap_manager_->insertPointCloudIntoMap(cloud, T_G_sensor);
+
+        FrustumAngles frustum_angles = octomap_manager_->getCameraFOV(camera_intrinsics_);
+        octomap_manager_->markFrustumAsViewed(T_G_secondary_sensor, frustum_angles.horizontal, frustum_angles.vertical, camera_intrinsics_.max_range);
         
         received_first_cloud_ = true;
         
@@ -172,7 +239,8 @@ void NBVPlannerNode::planningTimerCallback()
         
         // Publish candidate visualization
         publishFrustumMarker();
-        publishCandidateMarkers();
+        publishSecondaryFrustumMarker();
+        // publishCandidateMarkers();
         
     } catch (tf2::TransformException& ex) {
         RCLCPP_WARN(this->get_logger(), "Could not get robot pose: %s", ex.what());
@@ -183,39 +251,79 @@ void NBVPlannerNode::publishOctomapMarkers()
 {
     // Simple visualization of occupied voxels
     visualization_msgs::msg::MarkerArray marker_array;
-    visualization_msgs::msg::Marker marker;
+    visualization_msgs::msg::Marker free_marker;
+    visualization_msgs::msg::Marker occupied_marker;
+    visualization_msgs::msg::Marker viewed_marker;
     
-    marker.header.frame_id = map_frame_;
-    marker.header.stamp = this->now();
-    marker.ns = "occupied_cells";
-    marker.id = 0;
-    marker.type = visualization_msgs::msg::Marker::CUBE_LIST;
-    marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.scale.x = octomap_manager_->getResolution();
-    marker.scale.y = octomap_manager_->getResolution();
-    marker.scale.z = octomap_manager_->getResolution();
-    marker.color.r = 0.0;
-    marker.color.g = 0.0;
-    marker.color.b = 1.0;
-    marker.color.a = 0.5;
+    free_marker.header.frame_id = map_frame_;
+    free_marker.header.stamp = this->now();
+    free_marker.ns = "free_cells";
+    free_marker.id = 1;
+    free_marker.type = visualization_msgs::msg::Marker::CUBE_LIST;
+    free_marker.action = visualization_msgs::msg::Marker::ADD;
+    free_marker.scale.x = octomap_manager_->getResolution();
+    free_marker.scale.y = octomap_manager_->getResolution();
+    free_marker.scale.z = octomap_manager_->getResolution();
+    free_marker.color.r = 0.0;
+    free_marker.color.g = 1.0;
+    free_marker.color.b = 0.0;
+    free_marker.color.a = 0.2;
+
+    occupied_marker.header.frame_id = map_frame_;
+    occupied_marker.header.stamp = this->now();
+    occupied_marker.ns = "occupied_cells";
+    occupied_marker.id = 2;
+    occupied_marker.type = visualization_msgs::msg::Marker::CUBE_LIST;
+    occupied_marker.action = visualization_msgs::msg::Marker::ADD;
+    occupied_marker.scale.x = octomap_manager_->getResolution();
+    occupied_marker.scale.y = octomap_manager_->getResolution();
+    occupied_marker.scale.z = octomap_manager_->getResolution();
+    occupied_marker.color.r = 1.0;
+    occupied_marker.color.g = 0.0;
+    occupied_marker.color.b = 0.0;
+    occupied_marker.color.a = 1.0;
+
+    viewed_marker.header.frame_id = map_frame_;
+    viewed_marker.header.stamp = this->now();
+    viewed_marker.ns = "viewed_cells";
+    viewed_marker.id = 3;
+    viewed_marker.type = visualization_msgs::msg::Marker::CUBE_LIST;
+    viewed_marker.action = visualization_msgs::msg::Marker::ADD;
+    viewed_marker.scale.x = octomap_manager_->getResolution();
+    viewed_marker.scale.y = octomap_manager_->getResolution();
+    viewed_marker.scale.z = octomap_manager_->getResolution();
+    viewed_marker.color.r = 0.0;
+    viewed_marker.color.g = 0.0;
+    viewed_marker.color.b = 1.0;
+    viewed_marker.color.a = 1.0;
     
     const auto& octree = octomap_manager_->getOctree();
     
     // Iterate through all leaf nodes
     for (auto it = octree.begin_leafs(); it != octree.end_leafs(); ++it) {
+        geometry_msgs::msg::Point point;
+        point.x = it.getX();
+        point.y = it.getY();
+        point.z = it.getZ();
+
         if (octree.isNodeOccupied(*it)) {
-            geometry_msgs::msg::Point point;
-            point.x = it.getX();
-            point.y = it.getY();
-            point.z = it.getZ();
-            marker.points.push_back(point);
+            if (octomap_manager_->isVoxelViewed(it.getKey())) {
+                viewed_marker.points.push_back(point);
+            } else {
+                occupied_marker.points.push_back(point);
+            }
+        } else {
+            free_marker.points.push_back(point);
         }
     }
     
-    marker_array.markers.push_back(marker);
+    marker_array.markers.push_back(free_marker);
+    marker_array.markers.push_back(occupied_marker);
+    marker_array.markers.push_back(viewed_marker);
     markers_pub_->publish(marker_array);
 }
 
+// Placeholder for candidate poses visualization
 void NBVPlannerNode::publishCandidateMarkers()
 {
     visualization_msgs::msg::MarkerArray marker_array;
