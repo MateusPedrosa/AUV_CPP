@@ -133,6 +133,12 @@ def generate_launch_description():
         description='Launch RViz for visualization'
     )
 
+    declare_log_level = DeclareLaunchArgument(
+        'log_level',
+        default_value='info',
+        description='Logging level (debug, info, warn, error, fatal)'
+    )
+
     # NBV Planner Node
     nbv_planner_node = Node(
         package='nbv_planner',
@@ -174,8 +180,58 @@ def generate_launch_description():
         output='screen'
     )
 
+    static_transform_publisher_sonar_node = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=[
+            '--x', '0.3',
+            '--y', '0.0',
+            '--z', '0.3',
+            '--roll', '0.0',
+            '--pitch', '0.785398',  # 45 degrees in radians
+            '--yaw', '0.0',
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'sonar_link'
+        ]
+    )
+
+    static_transform_publisher_camera_node = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=[
+            '--x', '0.3',
+            '--y', '0.0',
+            '--z', '0.1',
+            '--roll', '1.5708',  # 90 degrees in radians
+            '--pitch', '0.0',
+            '--yaw', '0.0',
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'camera_link'
+        ]
+    )
+
+    sonar_point_cloud_node = Node(
+        package='sonar_mapping',
+        executable='sonar_point_cloud',
+        name='sonar_point_cloud_node',
+        output='screen',
+        parameters=[{
+            'sonar_topic': '/oceansim/robot/imaging_sonar',
+            'pose_topic': '/oceansim/robot/pose',
+            'resolution': 0.1,        # 10cm voxels
+            'max_range': 3.0,        # Match your Octomap range
+            'horizontal_fov': 130.0,  # Or 60.0 if using HF
+            'vertical_fov': 20.0,
+            'min_intensity_short_range': 0.4,
+            'min_intensity_long_range': 0.2,
+            'use_sim_time': True,
+        }],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+    )
+
     return LaunchDescription([
         # Declare arguments
+        declare_log_level,
         declare_map_frame,
         declare_robot_frame,
         declare_octree_resolution,
@@ -200,4 +256,7 @@ def generate_launch_description():
         # Launch nodes
         nbv_planner_node,
         rviz_node,
+        static_transform_publisher_sonar_node,
+        static_transform_publisher_camera_node,
+        sonar_point_cloud_node,
     ])
