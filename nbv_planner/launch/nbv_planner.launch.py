@@ -1,3 +1,5 @@
+import os
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -6,6 +8,17 @@ from launch.conditions import IfCondition
 
 
 def generate_launch_description():
+    # 1. Get the path to your config file
+    pkg_share = get_package_share_directory('nbv_planner')
+    default_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params.yaml')
+
+    # 2. Add a Launch Argument so you can swap the YAML file easily
+    declare_params_file = DeclareLaunchArgument(
+        'params_file',
+        default_value=default_params_path,
+        description='Full path to the ROS2 parameters file to use'
+    )
+
     # Declare launch arguments
     declare_map_frame = DeclareLaunchArgument(
         'map_frame',
@@ -47,6 +60,12 @@ def generate_launch_description():
         'max_free_space',
         default_value='0.0',
         description='Maximum distance to mark as free space (0 = unlimited)'
+    )
+
+    declare_min_height_free_space = DeclareLaunchArgument(
+        'min_height_free_space',
+        default_value='0.0',
+        description='Minimum height for free space marking'
     )
 
     declare_exploration_sensor_hfov = DeclareLaunchArgument(
@@ -114,24 +133,22 @@ def generate_launch_description():
         default_value='2.0',
         description='Maximum range for camera sensor'
     )
-
-    declare_min_height_free_space = DeclareLaunchArgument(
-        'min_height_free_space',
-        default_value='0.0',
-        description='Minimum height for free space marking'
-    )
     
     declare_cloud_topic = DeclareLaunchArgument(
         'cloud_topic',
         default_value='/sonar_point_cloud',
         description='Input point cloud topic'
     )
+
+    #################################
     
     declare_use_rviz = DeclareLaunchArgument(
         'use_rviz',
         default_value='false',
         description='Launch RViz for visualization'
     )
+
+    #################################
 
     declare_log_level = DeclareLaunchArgument(
         'log_level',
@@ -145,26 +162,30 @@ def generate_launch_description():
         executable='nbv_planner_node',
         name='nbv_planner',
         output='screen',
-        parameters=[{
-            'map_frame': LaunchConfiguration('map_frame'),
-            'robot_frame': LaunchConfiguration('robot_frame'),
-            'octree_resolution': LaunchConfiguration('octree_resolution'),
-            'planning_frequency': LaunchConfiguration('planning_frequency'),
-            'exploration_sensor_max_range': LaunchConfiguration('exploration_sensor_max_range'),
-            'exploration_sensor_min_range': LaunchConfiguration('exploration_sensor_min_range'),
-            'max_free_space': LaunchConfiguration('max_free_space'),
-            'min_height_free_space': LaunchConfiguration('min_height_free_space'),
-            'exploration_sensor_hfov': LaunchConfiguration('exploration_sensor_hfov'),
-            'exploration_sensor_vfov': LaunchConfiguration('exploration_sensor_vfov'),
-            'inspection_sensor_frames': LaunchConfiguration('inspection_sensor_frames'),
-            'camera_fx': LaunchConfiguration('camera_fx'),
-            'camera_fy': LaunchConfiguration('camera_fy'),
-            'camera_cx': LaunchConfiguration('camera_cx'),
-            'camera_cy': LaunchConfiguration('camera_cy'),
-            'camera_width': LaunchConfiguration('camera_width'),
-            'camera_height': LaunchConfiguration('camera_height'),
-            'camera_max_range': LaunchConfiguration('camera_max_range'),
-        }],
+        parameters=[
+            {
+                'map_frame': LaunchConfiguration('map_frame'),
+                'robot_frame': LaunchConfiguration('robot_frame'),
+                'octree_resolution': LaunchConfiguration('octree_resolution'),
+                'planning_frequency': LaunchConfiguration('planning_frequency'),
+                'exploration_sensor_max_range': LaunchConfiguration('exploration_sensor_max_range'),
+                'exploration_sensor_min_range': LaunchConfiguration('exploration_sensor_min_range'),
+                'max_free_space': LaunchConfiguration('max_free_space'),
+                'min_height_free_space': LaunchConfiguration('min_height_free_space'),
+                'exploration_sensor_hfov': LaunchConfiguration('exploration_sensor_hfov'),
+                'exploration_sensor_vfov': LaunchConfiguration('exploration_sensor_vfov'),
+                'inspection_sensor_frames': LaunchConfiguration('inspection_sensor_frames'),
+                'exploration_sensor_frame': LaunchConfiguration('exploration_sensor_frame'),
+                'camera_fx': LaunchConfiguration('camera_fx'),
+                'camera_fy': LaunchConfiguration('camera_fy'),
+                'camera_cx': LaunchConfiguration('camera_cx'),
+                'camera_cy': LaunchConfiguration('camera_cy'),
+                'camera_width': LaunchConfiguration('camera_width'),
+                'camera_height': LaunchConfiguration('camera_height'),
+                'camera_max_range': LaunchConfiguration('camera_max_range'),
+            },
+            LaunchConfiguration('params_file')
+        ],
         remappings=[
             ('cloud_in', LaunchConfiguration('cloud_topic')),
         ]
@@ -246,7 +267,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         # Declare arguments
-        declare_log_level,
+        declare_params_file,
         declare_map_frame,
         declare_robot_frame,
         declare_octree_resolution,
@@ -258,6 +279,7 @@ def generate_launch_description():
         declare_exploration_sensor_hfov,
         declare_exploration_sensor_vfov,
         declare_inspection_sensor_frames,
+        declare_exploration_sensor_frame,
         declare_camera_fx,
         declare_camera_fy,
         declare_camera_cx,
@@ -267,6 +289,7 @@ def generate_launch_description():
         declare_camera_max_range,
         declare_cloud_topic,
         declare_use_rviz,
+        declare_log_level,
         
         # Launch nodes
         nbv_planner_node,
