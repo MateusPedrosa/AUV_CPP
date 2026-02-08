@@ -61,10 +61,10 @@ def generate_launch_description():
         description='Exploration sensor vertical field of view in radians'
     )
 
-    declare_inspection_sensor_frame = DeclareLaunchArgument(
-        'inspection_sensor_frame',
-        default_value='camera_link',
-        description='Frame ID for the inspection sensor'
+    declare_inspection_sensor_frames = DeclareLaunchArgument(
+        'inspection_sensor_frames',
+        default_value="['camera_forward_link', 'camera_bottom_link']",
+        description='Frame IDs for the inspection sensors'
     )
 
     declare_exploration_sensor_frame = DeclareLaunchArgument(
@@ -156,7 +156,7 @@ def generate_launch_description():
             'min_height_free_space': LaunchConfiguration('min_height_free_space'),
             'exploration_sensor_hfov': LaunchConfiguration('exploration_sensor_hfov'),
             'exploration_sensor_vfov': LaunchConfiguration('exploration_sensor_vfov'),
-            'inspection_sensor_frame': LaunchConfiguration('inspection_sensor_frame'),
+            'inspection_sensor_frames': LaunchConfiguration('inspection_sensor_frames'),
             'camera_fx': LaunchConfiguration('camera_fx'),
             'camera_fy': LaunchConfiguration('camera_fy'),
             'camera_cx': LaunchConfiguration('camera_cx'),
@@ -195,7 +195,7 @@ def generate_launch_description():
         ]
     )
 
-    static_transform_publisher_camera_node = Node(
+    static_transform_publisher_forward_camera_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         arguments=[
@@ -206,7 +206,22 @@ def generate_launch_description():
             '--pitch', '0.0',
             '--yaw', '0.0',
             '--frame-id', 'base_link',
-            '--child-frame-id', 'camera_link'
+            '--child-frame-id', 'camera_forward_link'
+        ]
+    )
+
+    static_transform_publisher_bottom_camera_node = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=[
+            '--x', '0.3',
+            '--y', '0.0',
+            '--z', '0.1',
+            '--roll', '1.5708',  # 90 degrees in radians
+            '--pitch', '1.5708', # 90 degrees in radians
+            '--yaw', '0.0',
+            '--frame-id', 'base_link',
+            '--child-frame-id', 'camera_bottom_link'
         ]
     )
 
@@ -242,7 +257,7 @@ def generate_launch_description():
         declare_min_height_free_space,
         declare_exploration_sensor_hfov,
         declare_exploration_sensor_vfov,
-        declare_inspection_sensor_frame,
+        declare_inspection_sensor_frames,
         declare_camera_fx,
         declare_camera_fy,
         declare_camera_cx,
@@ -257,6 +272,7 @@ def generate_launch_description():
         nbv_planner_node,
         rviz_node,
         static_transform_publisher_sonar_node,
-        static_transform_publisher_camera_node,
+        static_transform_publisher_forward_camera_node,
+        static_transform_publisher_bottom_camera_node,
         sonar_point_cloud_node,
     ])

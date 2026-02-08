@@ -21,7 +21,7 @@ NBVPlannerNode::NBVPlannerNode()
     this->declare_parameter("min_height_free_space", 0.0);
     this->declare_parameter("exploration_sensor_hfov", 130.0 * M_PI / 180.0);
     this->declare_parameter("exploration_sensor_vfov", 20.0 * M_PI / 180.0); // 60 degrees
-    this->declare_parameter("inspection_sensor_frame", "camera_link");
+    this->declare_parameter("inspection_sensor_frames", std::vector<std::string>{"camera_forward_link", "camera_bottom_link"});
     this->declare_parameter("exploration_sensor_frame", "sonar_link");
     this->declare_parameter("camera_fx", 525.0);
     this->declare_parameter("camera_fy", 525.0);
@@ -36,7 +36,7 @@ NBVPlannerNode::NBVPlannerNode()
     robot_frame_ = this->get_parameter("robot_frame").as_string();
     planning_frequency_ = this->get_parameter("planning_frequency").as_double();
 
-    inspection_sensor_frame_ = this->get_parameter("inspection_sensor_frame").as_string();
+    inspection_sensor_frames_ = this->get_parameter("inspection_sensor_frames").as_string_array();
     exploration_sensor_frame_ = this->get_parameter("exploration_sensor_frame").as_string();
     
     camera_intrinsics_ = {
@@ -150,12 +150,12 @@ void NBVPlannerNode::publishFrustumMarker() {
     frustum_pub_->publish(marker);
 }
 
-void NBVPlannerNode::publishInspectionFrustumMarker() {
+void NBVPlannerNode::publishInspectionFrustumMarker(const std::string& frame_id) {
     visualization_msgs::msg::Marker marker;
-    marker.header.frame_id = inspection_sensor_frame_;
+    marker.header.frame_id = frame_id;
     marker.header.stamp = rclcpp::Time(0);
     marker.frame_locked = true;
-    marker.ns = "inspection_frustum";
+    marker.ns = frame_id + "_frustum";
     marker.id = 0;
     marker.type = visualization_msgs::msg::Marker::LINE_LIST;
     marker.action = visualization_msgs::msg::Marker::ADD;
@@ -205,16 +205,6 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
             msg->header.stamp);
         // Convert to Eigen transform
         Eigen::Isometry3d T_G_exploration_sensor = tf2::transformToEigen(t_exploration_sensor);
-        
-        // Get transform from inspection sensor to map frame
-        geometry_msgs::msg::TransformStamped t_inspection_sensor;
-        t_inspection_sensor = tf2_buffer_->lookupTransform(
-            map_frame_,
-            inspection_sensor_frame_,
-            msg->header.stamp,
-            tf2::durationFromSec(0.1)); // 100 ms timeout for this lookup
-        // Convert to Eigen transform
-        Eigen::Isometry3d T_G_inspection_sensor = tf2::transformToEigen(t_inspection_sensor);
 
         // Convert ROS PointCloud2 to PCL
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(
@@ -224,9 +214,21 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
         // Update octree using batch ray casting for the exploration sensor
         octomap_manager_->insertPointCloudIntoMap(cloud, T_G_exploration_sensor);
 
-        // Mark voxels in the inspection sensor's frustum as viewed
-        FrustumAngles frustum_angles = octomap_manager_->getCameraFOV(camera_intrinsics_);
-        octomap_manager_->markFrustumAsViewed(T_G_inspection_sensor, frustum_angles.horizontal, frustum_angles.vertical, camera_intrinsics_.max_range);
+        for (const auto& inspection_sensor_frame : inspection_sensor_frames_) {
+            // Get transform from inspection sensor to map frame
+            geometry_msgs::msg::TransformStamped t_inspection_sensor;
+            t_inspection_sensor = tf2_buffer_->lookupTransform(
+                map_frame_,
+                inspection_sensor_frame,
+                msg->header.stamp,
+                tf2::durationFromSec(0.1)); // 100 ms timeout for this lookup
+            // Convert to Eigen transform
+            Eigen::Isometry3d T_G_inspection_sensor = tf2::transformToEigen(t_inspection_sensor);
+
+            // Mark voxels in the inspection sensor's frustum as viewed
+            FrustumAngles frustum_angles = octomap_manager_->getCameraFOV(camera_intrinsics_);
+            octomap_manager_->markFrustumAsViewed(T_G_inspection_sensor, frustum_angles.horizontal, frustum_angles.vertical, camera_intrinsics_.max_range);
+        }
         
         received_first_cloud_ = true;
         
@@ -263,9 +265,10 @@ void NBVPlannerNode::planningTimerCallback()
         // Publish goal
         goal_pub_->publish(goal);
         
-        // Publish candidate visualization
         publishFrustumMarker();
-        publishInspectionFrustumMarker();
+        for (const auto& inspection_sensor_frame : inspection_sensor_frames_) {
+            publishInspectionFrustumMarker(inspection_sensor_frame);
+        }
         // publishCandidateMarkers();
         
     } catch (tf2::TransformException& ex) {

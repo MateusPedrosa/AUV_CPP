@@ -37,7 +37,7 @@ def generate_launch_description():
                 '--pitch', '0.0',
                 '--yaw', '0.0',
                 '--frame-id', 'base_link',
-                '--child-frame-id', 'camera_link'
+                '--child-frame-id', 'camera_forward_link'
             ]
         ),
         Node(

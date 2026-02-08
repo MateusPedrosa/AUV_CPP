@@ -32,7 +32,7 @@ private:
 
     void publishFrustumMarker();
 
-    void publishInspectionFrustumMarker();
+    void publishInspectionFrustumMarker(const std::string& frame_id);
     
     // Core components
     std::unique_ptr<OctomapManager> octomap_manager_;
@@ -57,7 +57,7 @@ private:
     std::string robot_frame_;
     std::string cloud_topic_;
     double planning_frequency_;
-    std::string inspection_sensor_frame_;
+    std::vector<std::string> inspection_sensor_frames_;
     std::string exploration_sensor_frame_;
     CameraIntrinsics camera_intrinsics_;
     
