@@ -41,6 +41,11 @@ struct FrustumAngles {
     double vertical;
 };
 
+struct MapBounds {
+    octomap::point3d min;
+    octomap::point3d max;
+};
+
 class OctomapManager {
 public:
     /**
@@ -91,7 +96,7 @@ public:
     /**
      * @brief Get map bounds
      */
-    void getMapBounds(octomap::point3d& min, octomap::point3d& max) const;
+    MapBounds getMapBounds() const;
 
     FrustumAngles getCameraFOV(const CameraIntrinsics& intrinsics) const;
 

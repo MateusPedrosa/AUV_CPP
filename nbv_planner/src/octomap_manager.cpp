@@ -247,13 +247,15 @@ bool OctomapManager::loadMap(const std::string& filename) {
     return false;
 }
 
-void OctomapManager::getMapBounds(octomap::point3d& min, octomap::point3d& max) const {
-    double x, y, z;
-    octree_->getMetricMin(x, y, z);
-    min = octomap::point3d(x, y, z);
+MapBounds OctomapManager::getMapBounds() const {
+    double minX, minY, minZ, maxX, maxY, maxZ;
+    octree_->getMetricMin(minX, minY, minZ);
+    octree_->getMetricMax(maxX, maxY, maxZ);
     
-    octree_->getMetricMax(x, y, z);
-    max = octomap::point3d(x, y, z);
+    return { 
+        octomap::point3d((float)minX, (float)minY, (float)minZ), 
+        octomap::point3d((float)maxX, (float)maxY, (float)maxZ) 
+    };
 }
 
 bool OctomapManager::isVoxelViewed(const octomap::OcTreeKey& key) const
