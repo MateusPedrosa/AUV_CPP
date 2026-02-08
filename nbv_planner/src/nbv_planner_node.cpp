@@ -2,6 +2,7 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <pcl_conversions/pcl_conversions.h>
+#include "tf2_ros/create_timer_ros.h"
 
 namespace nbv_planner {
 
@@ -14,13 +15,14 @@ NBVPlannerNode::NBVPlannerNode()
     this->declare_parameter("robot_frame", "base_link");
     this->declare_parameter("octree_resolution", 0.1);
     this->declare_parameter("planning_frequency", 0.5);
-    this->declare_parameter("sensor_range", 5.0);
-    this->declare_parameter("sensor_min_range", 0.1);
+    this->declare_parameter("exploration_sensor_max_range", 5.0);
+    this->declare_parameter("exploration_sensor_min_range", 0.1);
     this->declare_parameter("max_free_space", 0.0);
     this->declare_parameter("min_height_free_space", 0.0);
-    this->declare_parameter("sensor_hfov", 130.0 * M_PI / 180.0);
-    this->declare_parameter("sensor_vfov", 20.0 * M_PI / 180.0); // 60 degrees
-    this->declare_parameter("secondary_sensor_frame", "camera_link");
+    this->declare_parameter("exploration_sensor_hfov", 130.0 * M_PI / 180.0);
+    this->declare_parameter("exploration_sensor_vfov", 20.0 * M_PI / 180.0); // 60 degrees
+    this->declare_parameter("inspection_sensor_frame", "camera_link");
+    this->declare_parameter("exploration_sensor_frame", "sonar_link");
     this->declare_parameter("camera_fx", 525.0);
     this->declare_parameter("camera_fy", 525.0);
     this->declare_parameter("camera_cx", 319.5);
@@ -34,7 +36,8 @@ NBVPlannerNode::NBVPlannerNode()
     robot_frame_ = this->get_parameter("robot_frame").as_string();
     planning_frequency_ = this->get_parameter("planning_frequency").as_double();
 
-    secondary_sensor_frame_ = this->get_parameter("secondary_sensor_frame").as_string();
+    inspection_sensor_frame_ = this->get_parameter("inspection_sensor_frame").as_string();
+    exploration_sensor_frame_ = this->get_parameter("exploration_sensor_frame").as_string();
     
     camera_intrinsics_ = {
         this->get_parameter("camera_fx").as_double(),
@@ -49,12 +52,12 @@ NBVPlannerNode::NBVPlannerNode()
     // Configure octomap parameters
     OctomapParameters octomap_params;
     octomap_params.resolution = this->get_parameter("octree_resolution").as_double();
-    octomap_params.sensor_max_range = this->get_parameter("sensor_range").as_double();
-    octomap_params.sensor_min_range = this->get_parameter("sensor_min_range").as_double();
+    octomap_params.sensor_max_range = this->get_parameter("exploration_sensor_max_range").as_double();
+    octomap_params.sensor_min_range = this->get_parameter("exploration_sensor_min_range").as_double();
     octomap_params.max_free_space = this->get_parameter("max_free_space").as_double();
     octomap_params.min_height_free_space = this->get_parameter("min_height_free_space").as_double();
-    octomap_params.sensor_hfov = this->get_parameter("sensor_hfov").as_double();
-    octomap_params.sensor_vfov = this->get_parameter("sensor_vfov").as_double();
+    octomap_params.sensor_hfov = this->get_parameter("exploration_sensor_hfov").as_double();
+    octomap_params.sensor_vfov = this->get_parameter("exploration_sensor_vfov").as_double();
     
     // Initialize components
     octomap_manager_ = std::make_unique<OctomapManager>(octomap_params);
@@ -64,17 +67,31 @@ NBVPlannerNode::NBVPlannerNode()
     nbv_planner_->setParameters(
         octomap_params.sensor_max_range, M_PI/2, M_PI/3, 8, 3);
     
-    // Initialize TF
-    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    // Initialize TF2
+    std::chrono::milliseconds buffer_timeout(100); // 100 ms timeout for TF2 lookups
+    tf2_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
+    auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
+        this->get_node_base_interface(),
+        this->get_node_timers_interface());
+    tf2_buffer_->setCreateTimerInterface(timer_interface);
+    tf2_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer_);
 
     auto qos = rclcpp::QoS(rclcpp::KeepLast(10));
     qos.reliability(rclcpp::ReliabilityPolicy::BestEffort);
     
     // Create subscribers
-    cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "cloud_in", qos,
-        std::bind(&NBVPlannerNode::pointCloudCallback, this, std::placeholders::_1));
+    point_cloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>();
+    point_cloud_sub_->subscribe(this, "cloud_in", qos.get_rmw_qos_profile());
+    tf2_filter_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
+        *point_cloud_sub_, 
+        *tf2_buffer_, 
+        map_frame_, 
+        10,
+        this->get_node_logging_interface(),
+        this->get_node_clock_interface(),
+        buffer_timeout
+    );
+    tf2_filter_->registerCallback(&NBVPlannerNode::pointCloudCallback, this);
     
     // Create publishers
     goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
@@ -83,8 +100,8 @@ NBVPlannerNode::NBVPlannerNode()
         "octomap_markers", 10);
     candidates_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "candidate_markers", 10);
-    frustum_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("sensor_frustum", 10);
-    secondary_frustum_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("secondary_sensor_frustum", 10);
+    frustum_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("exploration_sensor_frustum", 10);
+    inspection_frustum_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("inspection_sensor_frustum", 10);
     
     // Create timer for planning
     auto period = std::chrono::duration<double>(1.0 / planning_frequency_);
@@ -94,14 +111,14 @@ NBVPlannerNode::NBVPlannerNode()
     
     RCLCPP_INFO(this->get_logger(), "NBV Planner Node initialized");
     RCLCPP_INFO(this->get_logger(), "  Resolution: %.3f m", octomap_params.resolution);
-    RCLCPP_INFO(this->get_logger(), "  Sensor range: [%.2f, %.2f] m", 
+    RCLCPP_INFO(this->get_logger(), "  Exploration sensor range: [%.2f, %.2f] m", 
                 octomap_params.sensor_min_range, octomap_params.sensor_max_range);
 }
 
 void NBVPlannerNode::publishFrustumMarker() {
     const auto& params = octomap_manager_->getParams();
     visualization_msgs::msg::Marker marker;
-    marker.header.frame_id = "sonar_link"; // Use the actual sensor frame
+    marker.header.frame_id = exploration_sensor_frame_; //TODO: get frame from params
     marker.header.stamp = rclcpp::Time(0);
     marker.frame_locked = true;
     marker.ns = "frustum";
@@ -133,12 +150,12 @@ void NBVPlannerNode::publishFrustumMarker() {
     frustum_pub_->publish(marker);
 }
 
-void NBVPlannerNode::publishSecondaryFrustumMarker() {
+void NBVPlannerNode::publishInspectionFrustumMarker() {
     visualization_msgs::msg::Marker marker;
-    marker.header.frame_id = secondary_sensor_frame_; // Use the actual sensor frame
+    marker.header.frame_id = inspection_sensor_frame_;
     marker.header.stamp = rclcpp::Time(0);
     marker.frame_locked = true;
-    marker.ns = "frustum";
+    marker.ns = "inspection_frustum";
     marker.id = 0;
     marker.type = visualization_msgs::msg::Marker::LINE_LIST;
     marker.action = visualization_msgs::msg::Marker::ADD;
@@ -164,43 +181,52 @@ void NBVPlannerNode::publishSecondaryFrustumMarker() {
     marker.color.b = 1.0;
     marker.color.a = 1.0;
 
-    secondary_frustum_pub_->publish(marker);
+    inspection_frustum_pub_->publish(marker);
 }
 
-void NBVPlannerNode::pointCloudCallback(
-    const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
 {
+    if (msg->header.frame_id != exploration_sensor_frame_) {
+        RCLCPP_WARN_THROTTLE(
+            this->get_logger(),
+            *this->get_clock(),
+            5000,  // Log every 5 seconds max
+            "Received point cloud in frame '%s', expected '%s'",
+            msg->header.frame_id.c_str(), 
+            exploration_sensor_frame_.c_str());
+        return;
+    }
     try {
-        // Get transform from sensor to map frame
-        geometry_msgs::msg::TransformStamped transform_stamped_main_sensor;
-        transform_stamped_main_sensor = tf_buffer_->lookupTransform(
+        // Get transform from exploration sensor to map frame
+        geometry_msgs::msg::TransformStamped t_exploration_sensor;
+        t_exploration_sensor = tf2_buffer_->lookupTransform(
             map_frame_,
-            msg->header.frame_id,
-            msg->header.stamp,
-            rclcpp::Duration::from_seconds(0.1));
-        
+            msg->header.frame_id, // Point cloud should be published in the exploration sensor frame
+            msg->header.stamp);
         // Convert to Eigen transform
-        Eigen::Isometry3d T_G_sensor = tf2::transformToEigen(transform_stamped_main_sensor);
+        Eigen::Isometry3d T_G_exploration_sensor = tf2::transformToEigen(t_exploration_sensor);
         
-        geometry_msgs::msg::TransformStamped transform_stamped_secondary_sensor;
-        transform_stamped_secondary_sensor = tf_buffer_->lookupTransform(
+        // Get transform from inspection sensor to map frame
+        geometry_msgs::msg::TransformStamped t_inspection_sensor;
+        t_inspection_sensor = tf2_buffer_->lookupTransform(
             map_frame_,
-            secondary_sensor_frame_,
+            inspection_sensor_frame_,
             msg->header.stamp,
-            rclcpp::Duration::from_seconds(0.1));
-
-        Eigen::Isometry3d T_G_secondary_sensor = tf2::transformToEigen(transform_stamped_secondary_sensor);
+            tf2::durationFromSec(0.1)); // 100 ms timeout for this lookup
+        // Convert to Eigen transform
+        Eigen::Isometry3d T_G_inspection_sensor = tf2::transformToEigen(t_inspection_sensor);
 
         // Convert ROS PointCloud2 to PCL
         pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(
             new pcl::PointCloud<pcl::PointXYZ>());
         pcl::fromROSMsg(*msg, *cloud);
         
-        // Update octree using batch ray casting
-        octomap_manager_->insertPointCloudIntoMap(cloud, T_G_sensor);
+        // Update octree using batch ray casting for the exploration sensor
+        octomap_manager_->insertPointCloudIntoMap(cloud, T_G_exploration_sensor);
 
+        // Mark voxels in the inspection sensor's frustum as viewed
         FrustumAngles frustum_angles = octomap_manager_->getCameraFOV(camera_intrinsics_);
-        octomap_manager_->markFrustumAsViewed(T_G_secondary_sensor, frustum_angles.horizontal, frustum_angles.vertical, camera_intrinsics_.max_range);
+        octomap_manager_->markFrustumAsViewed(T_G_inspection_sensor, frustum_angles.horizontal, frustum_angles.vertical, camera_intrinsics_.max_range);
         
         received_first_cloud_ = true;
         
@@ -221,7 +247,7 @@ void NBVPlannerNode::planningTimerCallback()
     try {
         // Get current robot pose
         geometry_msgs::msg::TransformStamped transform;
-        transform = tf_buffer_->lookupTransform(
+        transform = tf2_buffer_->lookupTransform(
             map_frame_, robot_frame_, tf2::TimePointZero);
         
         current_pose_.position.x = transform.transform.translation.x;
@@ -239,7 +265,7 @@ void NBVPlannerNode::planningTimerCallback()
         
         // Publish candidate visualization
         publishFrustumMarker();
-        publishSecondaryFrustumMarker();
+        publishInspectionFrustumMarker();
         // publishCandidateMarkers();
         
     } catch (tf2::TransformException& ex) {

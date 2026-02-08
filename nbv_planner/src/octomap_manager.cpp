@@ -110,7 +110,7 @@ void OctomapManager::castRay(
     }
 }
 
-// void OctomapManager::castRaySecondary(
+// void OctomapManager::castRayInspection(
 //     const octomap::point3d& sensor_origin,
 //     const octomap::point3d& point,
 //     octomap::KeySet* viewed_cells)
@@ -128,12 +128,12 @@ void OctomapManager::castRay(
 //     }
 
 //     // Cast a ray to compute all the free cells.
-//     key_ray_secondary_.reset();
-//     if (octree_->computeRayKeys(sensor_origin, ray_end, key_ray_secondary_)) {
+//     key_ray_inspection_.reset();
+//     if (octree_->computeRayKeys(sensor_origin, ray_end, key_ray_inspection_)) {
 //         if (params_.max_free_space == 0.0) {
-//             viewed_cells->insert(key_ray_secondary_.begin(), key_ray_secondary_.end());
+//             viewed_cells->insert(key_ray_inspection_.begin(), key_ray_inspection_.end());
 //         } else {
-//             for (const auto& key : key_ray_secondary_) {
+//             for (const auto& key : key_ray_inspection_) {
 //                 octomap::point3d voxel_coordinate = octree_->keyToCoord(key);
 //                 double voxel_distance = (voxel_coordinate - sensor_origin).norm();
 //                 if (voxel_distance < params_.max_free_space ||

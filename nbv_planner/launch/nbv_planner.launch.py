@@ -31,16 +31,16 @@ def generate_launch_description():
         description='Planning frequency in Hz'
     )
     
-    declare_sensor_range = DeclareLaunchArgument(
-        'sensor_range',
+    declare_exploration_sensor_max_range = DeclareLaunchArgument(
+        'exploration_sensor_max_range',
         default_value='40.0',
-        description='Maximum sensor range in meters'
+        description='Maximum exploration sensor range in meters'
     )
     
-    declare_sensor_min_range = DeclareLaunchArgument(
-        'sensor_min_range',
+    declare_exploration_sensor_min_range = DeclareLaunchArgument(
+        'exploration_sensor_min_range',
         default_value='0.2',
-        description='Minimum sensor range in meters'
+        description='Minimum exploration sensor range in meters'
     )
     
     declare_max_free_space = DeclareLaunchArgument(
@@ -49,22 +49,28 @@ def generate_launch_description():
         description='Maximum distance to mark as free space (0 = unlimited)'
     )
 
-    declare_sensor_hfov = DeclareLaunchArgument(
-        'sensor_hfov',
+    declare_exploration_sensor_hfov = DeclareLaunchArgument(
+        'exploration_sensor_hfov',
         default_value=str(130.0 * 3.14159 / 180.0),  # 130 degrees in radians
-        description='Sensor horizontal field of view in radians'
+        description='Exploration sensor horizontal field of view in radians'
     )
 
-    declare_sensor_vfov = DeclareLaunchArgument(
-        'sensor_vfov',
+    declare_exploration_sensor_vfov = DeclareLaunchArgument(
+        'exploration_sensor_vfov',
         default_value=str(20.0 * 3.14159 / 180.0),  # 20 degrees in radians
-        description='Sensor vertical field of view in radians'
+        description='Exploration sensor vertical field of view in radians'
     )
 
-    declare_secondary_sensor_frame = DeclareLaunchArgument(
-        'secondary_sensor_frame',
+    declare_inspection_sensor_frame = DeclareLaunchArgument(
+        'inspection_sensor_frame',
         default_value='camera_link',
-        description='Frame ID for the secondary sensor'
+        description='Frame ID for the inspection sensor'
+    )
+
+    declare_exploration_sensor_frame = DeclareLaunchArgument(
+        'exploration_sensor_frame',
+        default_value='sonar_link',
+        description='Frame ID for the exploration sensor'
     )
 
     declare_camera_fx = DeclareLaunchArgument(
@@ -123,7 +129,7 @@ def generate_launch_description():
     
     declare_use_rviz = DeclareLaunchArgument(
         'use_rviz',
-        default_value='true',
+        default_value='false',
         description='Launch RViz for visualization'
     )
 
@@ -138,13 +144,13 @@ def generate_launch_description():
             'robot_frame': LaunchConfiguration('robot_frame'),
             'octree_resolution': LaunchConfiguration('octree_resolution'),
             'planning_frequency': LaunchConfiguration('planning_frequency'),
-            'sensor_range': LaunchConfiguration('sensor_range'),
-            'sensor_min_range': LaunchConfiguration('sensor_min_range'),
+            'exploration_sensor_max_range': LaunchConfiguration('exploration_sensor_max_range'),
+            'exploration_sensor_min_range': LaunchConfiguration('exploration_sensor_min_range'),
             'max_free_space': LaunchConfiguration('max_free_space'),
             'min_height_free_space': LaunchConfiguration('min_height_free_space'),
-            'sensor_hfov': LaunchConfiguration('sensor_hfov'),
-            'sensor_vfov': LaunchConfiguration('sensor_vfov'),
-            'secondary_sensor_frame': LaunchConfiguration('secondary_sensor_frame'),
+            'exploration_sensor_hfov': LaunchConfiguration('exploration_sensor_hfov'),
+            'exploration_sensor_vfov': LaunchConfiguration('exploration_sensor_vfov'),
+            'inspection_sensor_frame': LaunchConfiguration('inspection_sensor_frame'),
             'camera_fx': LaunchConfiguration('camera_fx'),
             'camera_fy': LaunchConfiguration('camera_fy'),
             'camera_cx': LaunchConfiguration('camera_cx'),
@@ -174,13 +180,13 @@ def generate_launch_description():
         declare_robot_frame,
         declare_octree_resolution,
         declare_planning_frequency,
-        declare_sensor_range,
-        declare_sensor_min_range,
+        declare_exploration_sensor_max_range,
+        declare_exploration_sensor_min_range,
         declare_max_free_space,
         declare_min_height_free_space,
-        declare_sensor_hfov,
-        declare_sensor_vfov,
-        declare_secondary_sensor_frame,
+        declare_exploration_sensor_hfov,
+        declare_exploration_sensor_vfov,
+        declare_inspection_sensor_frame,
         declare_camera_fx,
         declare_camera_fy,
         declare_camera_cx,

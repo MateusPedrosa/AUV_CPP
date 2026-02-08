@@ -110,9 +110,9 @@ private:
     OctomapParameters params_;
 
     octomap::KeyRay key_ray_;
-    octomap::KeyRay key_ray_secondary_;
+    // octomap::KeyRay key_ray_inspection_;
 
-    // Set of voxels viewed by the secondary sensor in the two sensors configuration (e.g. sonar + camera)
+    // Set of voxels viewed by the inspection sensor in the two sensors configuration (e.g. sonar + camera)
     octomap::KeySet viewed_voxels_;
 };
 
