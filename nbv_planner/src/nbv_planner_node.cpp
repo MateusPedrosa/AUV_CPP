@@ -60,12 +60,14 @@ NBVPlannerNode::NBVPlannerNode()
     octomap_params.sensor_vfov = this->get_parameter("exploration_sensor_vfov").as_double();
     
     // Initialize components
-    octomap_manager_ = std::make_unique<OctomapManager>(octomap_params);
+    octomap_manager_ = std::make_shared<OctomapManager>(octomap_params);
     nbv_planner_ = std::make_unique<NBVPlanner>(this->get_logger());
+
+    // Initialize path planner action server with shared octomap_manager
+    path_planner_ = std::make_unique<SimplePlanner>(this, octomap_manager_);
     
-    // Configure planner
-    nbv_planner_->setParameters(
-        octomap_params.sensor_max_range, M_PI/2, M_PI/3, 8, 3);
+    // Configure planner (placeholder)
+    nbv_planner_->setParameters(octomap_params.sensor_max_range, M_PI/2, M_PI/3, 8, 3);
     
     // Initialize TF2
     std::chrono::milliseconds buffer_timeout(100); // 100 ms timeout for TF2 lookups

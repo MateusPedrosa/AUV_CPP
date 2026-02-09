@@ -161,6 +161,7 @@ def generate_launch_description():
         package='nbv_planner',
         executable='nbv_planner_node',
         name='nbv_planner',
+        # prefix=['xterm -e gdb -ex run --args'],
         output='screen',
         parameters=[
             {

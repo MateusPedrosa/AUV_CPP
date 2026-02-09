@@ -12,6 +12,7 @@
 
 #include "nbv_planner/octomap_manager.hpp"
 #include "nbv_planner/nbv_planner.hpp"
+#include "nbv_planner/simple_planner.hpp"
 
 namespace nbv_planner {
 
@@ -35,8 +36,9 @@ private:
     void publishInspectionFrustumMarker(const std::string& frame_id);
     
     // Core components
-    std::unique_ptr<OctomapManager> octomap_manager_;
+    std::shared_ptr<OctomapManager> octomap_manager_;
     std::unique_ptr<NBVPlanner> nbv_planner_;
+    std::unique_ptr<SimplePlanner> path_planner_;
     
     // ROS interfaces
     std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> point_cloud_sub_;

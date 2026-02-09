@@ -12,18 +12,29 @@ endif()
 # --- Find Dependencies ---
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_action REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
+find_package(message_filters REQUIRED)
 find_package(PCL REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(octomap REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(ompl REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(action_msgs REQUIRED)
+
+# Generate action interfaces
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "action/PlanPath.action"
+  DEPENDENCIES geometry_msgs nav_msgs
+)
 
 # --- Global Definitions ---
 # Required for PCL + Eigen to work without crashing
@@ -55,15 +66,24 @@ target_include_directories(simple_planner PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${OMPL_INCLUDE_DIRS}
+  ${OCTOMAP_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
 )
 # Link OMPL and Eigen
 target_link_libraries(simple_planner
+  octomap_manager
   ${OMPL_LIBRARIES}
   Eigen3::Eigen
 )
+rosidl_get_typesupport_target(cpp_typesupport_target
+  ${PROJECT_NAME} rosidl_typesupport_cpp)
+target_link_libraries(simple_planner "${cpp_typesupport_target}")
+add_dependencies(simple_planner ${PROJECT_NAME})
 ament_target_dependencies(simple_planner
   rclcpp
+  rclcpp_action
+  geometry_msgs
+  nav_msgs
   sensor_msgs
 )
 
@@ -96,16 +116,39 @@ target_link_libraries(nbv_planner_node
   simple_planner
   nbv_planner_lib
 )
+add_dependencies(nbv_planner_node ${PROJECT_NAME})
 ament_target_dependencies(nbv_planner_node
   rclcpp
+  rclcpp_action
   sensor_msgs
   geometry_msgs
+  nav_msgs
   visualization_msgs
   tf2
   tf2_ros
   tf2_geometry_msgs
   tf2_eigen
+  message_filters
   pcl_conversions
+)
+
+# --- Executable: plan_path_client ---
+add_executable(plan_path_client src/plan_path_client.cpp)
+target_include_directories(plan_path_client PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+# Link action interface to client
+target_link_libraries(plan_path_client "${cpp_typesupport_target}")
+add_dependencies(plan_path_client ${PROJECT_NAME})
+
+ament_target_dependencies(plan_path_client
+  rclcpp
+  rclcpp_action
+  geometry_msgs
+  tf2
+  tf2_geometry_msgs
 )
 
 # --- Install Rules ---
@@ -123,6 +166,7 @@ install(TARGETS
 # Install Executables (to lib/project_name/)
 install(TARGETS
   nbv_planner_node
+  plan_path_client
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -139,4 +183,12 @@ install(DIRECTORY launch rviz config
 # --- Export for downstream packages ---
 ament_export_include_directories(include)
 ament_export_libraries(octomap_manager simple_planner nbv_planner_lib)
+ament_export_dependencies(
+  rclcpp
+  rclcpp_action
+  geometry_msgs
+  nav_msgs
+  ompl
+  octomap
+)
 ament_package()

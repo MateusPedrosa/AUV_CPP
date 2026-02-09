@@ -1,0 +1,13 @@
+# Goal
+geometry_msgs/Pose start_pose
+geometry_msgs/Pose goal_pose
+float64 time_limit
+---
+# Result
+bool success
+nav_msgs/Path path
+string message
+---
+# Feedback
+string status
+float32 progress
