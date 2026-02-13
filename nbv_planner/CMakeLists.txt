@@ -10,6 +10,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # --- Find Dependencies ---
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -27,6 +28,7 @@ find_package(pcl_conversions REQUIRED)
 find_package(octomap REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(ompl REQUIRED)
+find_package(voxblox REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(action_msgs REQUIRED)
 
@@ -39,6 +41,26 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # --- Global Definitions ---
 # Required for PCL + Eigen to work without crashing
 add_definitions(${PCL_DEFINITIONS})
+
+# --- Library: voxblox_manager ---
+add_library(voxblox_manager src/voxblox_manager.cpp)
+target_include_directories(voxblox_manager PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+  ${PCL_INCLUDE_DIRS}
+  ${VOXBLOX_INCLUDE_DIRS}
+)
+target_link_libraries(voxblox_manager
+  ${PCL_LIBRARIES}
+  voxblox::voxblox
+  Eigen3::Eigen
+)
+ament_target_dependencies(voxblox_manager
+  rclcpp
+  sensor_msgs
+  pcl_conversions
+  tf2_eigen
+)
 
 # --- Library: octomap_manager ---
 add_library(octomap_manager src/octomap_manager.cpp)
@@ -132,6 +154,33 @@ ament_target_dependencies(nbv_planner_node
   pcl_conversions
 )
 
+# --- Executable: nbv_planner_node_voxblox ---
+add_executable(nbv_planner_node_voxblox src/nbv_planner_node_voxblox.cpp)
+target_include_directories(nbv_planner_node_voxblox PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(nbv_planner_node_voxblox
+  voxblox_manager
+  simple_planner
+  nbv_planner_lib
+)
+add_dependencies(nbv_planner_node_voxblox ${PROJECT_NAME})
+ament_target_dependencies(nbv_planner_node_voxblox
+  rclcpp
+  rclcpp_action
+  sensor_msgs
+  geometry_msgs
+  nav_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+  tf2_eigen
+  message_filters
+  pcl_conversions
+)
+
 # --- Executable: plan_path_client ---
 add_executable(plan_path_client src/plan_path_client.cpp)
 target_include_directories(plan_path_client PUBLIC
@@ -166,6 +215,7 @@ install(TARGETS
 # Install Executables (to lib/project_name/)
 install(TARGETS
   nbv_planner_node
+  nbv_planner_node_voxblox
   plan_path_client
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -190,5 +240,6 @@ ament_export_dependencies(
   nav_msgs
   ompl
   octomap
+  voxblox
 )
 ament_package()

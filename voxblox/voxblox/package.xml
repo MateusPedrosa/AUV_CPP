@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>voxblox</name>
+  <version>0.0.0</version>
+  <description>Voxblox</description>
+
+  <author email="helen.oleynikova@mavt.ethz.ch">Helen Oleynikova</author>
+  <author email="marius.fehr@mavt.ethz.ch">Marius Fehr</author>
+
+  <maintainer email="helen.oleynikova@mavt.ethz.ch">Helen Oleynikova</maintainer>
+  <maintainer email="marius.fehr@mavt.ethz.ch">Marius Fehr</maintainer>
+
+  <license>BSD</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_gtest</buildtool_depend>
+
+  <depend>eigen</depend>
+  <depend>eigen_checks</depend>
+  <depend>gflags</depend>
+  <depend>glog</depend>
+  <depend>protobuf-dev</depend>
+  <depend>kindr</depend>
+  <depend>minkindr</depend>
+  <depend>eigen3_cmake_module</depend>
+
+</package>

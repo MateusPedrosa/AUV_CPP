@@ -1,0 +1,73 @@
+#ifndef NBV_PLANNER_NBV_PLANNER_NODE_VOXBLOX_HPP
+#define NBV_PLANNER_NBV_PLANNER_NODE_VOXBLOX_HPP
+
+#include <rclcpp/rclcpp.hpp>
+#include <message_filters/subscriber.h>
+#include <tf2_ros/message_filter.h>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_ros/buffer.h>
+
+#include "nbv_planner/voxblox_manager.hpp"
+#include "nbv_planner/nbv_planner.hpp"
+#include "nbv_planner/simple_planner.hpp"
+
+namespace nbv_planner {
+
+class NBVPlannerNodeVoxblox : public rclcpp::Node {
+public:
+    NBVPlannerNodeVoxblox();
+    
+    ~NBVPlannerNodeVoxblox() = default;
+
+private:
+    void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+    
+    void planningTimerCallback();
+    
+    void publishVoxbloxMarkers();
+    
+    void publishCandidateMarkers();
+
+    void publishFrustumMarker();
+
+    void publishInspectionFrustumMarker(const std::string& frame_id);
+    
+    // Core components
+    std::shared_ptr<VoxbloxManager> voxblox_manager_;
+    std::unique_ptr<NBVPlanner> nbv_planner_;
+    std::unique_ptr<SimplePlanner> path_planner_;
+    
+    // ROS interfaces
+    std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> point_cloud_sub_;
+    std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>> tf2_filter_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr candidates_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr frustum_pub_;
+    rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr inspection_frustum_pub_;
+    rclcpp::TimerBase::SharedPtr planning_timer_;
+    
+    // TF
+    std::shared_ptr<tf2_ros::Buffer> tf2_buffer_;
+    std::shared_ptr<tf2_ros::TransformListener> tf2_listener_;
+    
+    // Parameters
+    std::string map_frame_;
+    std::string robot_frame_;
+    std::string cloud_topic_;
+    double planning_frequency_;
+    std::vector<std::string> inspection_sensor_frames_;
+    std::string exploration_sensor_frame_;
+    VoxbloxManager::CameraIntrinsics camera_intrinsics_;
+    
+    // State
+    geometry_msgs::msg::Pose current_pose_;
+    bool received_first_cloud_;
+};
+
+} // namespace nbv_planner
+
+#endif
