@@ -4,6 +4,7 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/transforms.h>
+#include <pcl/filters/radius_outlier_removal.h>
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -36,6 +37,8 @@ public:
         this->declare_parameter("vertical_fov", 20.0); // Vertical field of view in degrees
         this->declare_parameter("filter_window_size", 7); // Window size s (must be even, s+1 total beams)
         this->declare_parameter("filter_distance_threshold", 2.0); // Max average distance threshold in meters
+        this->declare_parameter("radius_search", 0.5); // 50cm radius
+        this->declare_parameter("min_neighbors", 5);   // At least 5 neighbors
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
@@ -48,6 +51,8 @@ public:
         v_fov_ = this->get_parameter("vertical_fov").as_double() * M_PI / 180.0;
         filter_window_size_ = this->get_parameter("filter_window_size").as_int();
         filter_distance_threshold_ = this->get_parameter("filter_distance_threshold").as_double();
+        radius_search_ = this->get_parameter("radius_search").as_double();
+        min_neighbors_ = this->get_parameter("min_neighbors").as_int();
 
         // Ensure window size is even
         if (filter_window_size_ % 2 != 0) {
@@ -83,6 +88,23 @@ private:
     double v_fov_;
     int filter_window_size_;
     double filter_distance_threshold_;
+    double radius_search_;
+    int min_neighbors_;
+
+    pcl::PointCloud<pcl::PointXYZ>::Ptr applyRadiusFilter(const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud) {
+        if (input_cloud->empty()) return input_cloud;
+
+        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+        pcl::RadiusOutlierRemoval<pcl::PointXYZ> outrem;
+        
+        outrem.setInputCloud(input_cloud);
+        outrem.setRadiusSearch(radius_search_);
+        outrem.setMinNeighborsInRadius(min_neighbors_);
+        
+        // Apply filter
+        outrem.filter(*filtered_cloud);
+        return filtered_cloud;
+    }
 
     /**
      * @brief Filters sonar features for noise and outliers using averaged point distances.
@@ -192,6 +214,10 @@ private:
                     continue;
                 }
 
+                // if (range > 5.0) {
+                //     continue; // Skip points outside valid range
+                // }
+
                 // Calculate bearing angle (horizontal)
                 // Assuming center column is 0 degrees, spreading across h_fov
                 double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
@@ -216,12 +242,16 @@ private:
             total_points_before += beam.size();
         }
 
-        pcl::PointCloud<pcl::PointXYZ> cloud = filterPointCloud(points_by_beam);
-        cloud.header.frame_id = "sonar_link";
+        pcl::PointCloud<pcl::PointXYZ> window_filtered_cloud = filterPointCloud(points_by_beam);
 
-        RCLCPP_DEBUG(this->get_logger(), "Filtered cloud from %zu beams to %zu points", points_by_beam.size(), cloud.size());
+        pcl::PointCloud<pcl::PointXYZ>::Ptr window_filtered_cloud_ptr = window_filtered_cloud.makeShared();
+        pcl::PointCloud<pcl::PointXYZ>::Ptr final_cloud = applyRadiusFilter(window_filtered_cloud_ptr);
 
-        size_t points_after = cloud.size();
+        final_cloud->header.frame_id = "sonar_link";
+
+        RCLCPP_DEBUG(this->get_logger(), "Filtered cloud from %zu beams to %zu points", points_by_beam.size(), final_cloud->size());
+
+        size_t points_after = final_cloud->size();
         size_t points_removed = total_points_before - points_after;
         double filter_percentage = total_points_before > 0 ? 
             (100.0 * points_removed / total_points_before) : 0.0;
@@ -230,15 +260,15 @@ private:
                     "Filtering: %zu points before -> %zu points after (removed %zu points, %.1f%%)",
                     total_points_before, points_after, points_removed, filter_percentage);
 
-        // Publish point cloud with same timestamp as input image
-        if (!cloud.empty()) {
+        // Publish filtered point cloud
+        if (!final_cloud->empty()) {
             sensor_msgs::msg::PointCloud2 output_msg;
-            pcl::toROSMsg(cloud, output_msg);
+            pcl::toROSMsg(*final_cloud, output_msg);
             output_msg.header.frame_id = "sonar_link";
             output_msg.header.stamp = this->now();
 
             point_cloud_pub_->publish(output_msg);
-            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", cloud.size());
+            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", final_cloud->size());
         } else {
             RCLCPP_WARN(this->get_logger(), "Point cloud is empty, nothing to publish.");
         }
