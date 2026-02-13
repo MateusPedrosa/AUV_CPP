@@ -15,7 +15,7 @@ NBVPlannerNode::NBVPlannerNode()
     this->declare_parameter("robot_frame", "base_link");
     this->declare_parameter("octree_resolution", 0.1);
     this->declare_parameter("planning_frequency", 0.5);
-    this->declare_parameter("exploration_sensor_max_range", 5.0);
+    this->declare_parameter("exploration_sensor_max_range", 40.0);
     this->declare_parameter("exploration_sensor_min_range", 0.1);
     this->declare_parameter("max_free_space", 0.0);
     this->declare_parameter("min_height_free_space", 0.0);

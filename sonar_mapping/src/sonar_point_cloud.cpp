@@ -28,17 +28,19 @@ public:
         this->declare_parameter("sonar_topic", "/oceansim/robot/imaging_sonar");
         this->declare_parameter("pose_topic", "/oceansim/robot/pose");
         this->declare_parameter("resolution", 0.1); // 10cm voxels
-        this->declare_parameter("max_range", 3.0); // Maximum sonar range in meters
+        this->declare_parameter("min_range", 0.1); // Minimum sonar range in meters
+        this->declare_parameter("max_range", 40.0); // Maximum sonar range in meters
         this->declare_parameter("min_intensity_short_range", 0.4); // Minimum intensity threshold for short range
         this->declare_parameter("min_intensity_long_range", 0.2); // Minimum intensity threshold for long range
         this->declare_parameter("horizontal_fov", 130.0); // Horizontal field of view in degrees
         this->declare_parameter("vertical_fov", 20.0); // Vertical field of view in degrees
         this->declare_parameter("filter_window_size", 7); // Window size s (must be even, s+1 total beams)
-        this->declare_parameter("filter_distance_threshold", 0.5); // Max average distance threshold in meters
+        this->declare_parameter("filter_distance_threshold", 2.0); // Max average distance threshold in meters
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
         resolution_ = this->get_parameter("resolution").as_double();
+        min_range_ = this->get_parameter("min_range").as_double();
         max_range_ = this->get_parameter("max_range").as_double();
         min_intensity_short_range_ = this->get_parameter("min_intensity_short_range").as_double();
         min_intensity_long_range_ = this->get_parameter("min_intensity_long_range").as_double();
@@ -73,6 +75,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_pub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sonar_subscriber_;
     double resolution_;
+    double min_range_;
     double max_range_;
     double min_intensity_short_range_;
     double min_intensity_long_range_;
@@ -161,7 +164,15 @@ private:
         int rows = sonar_image.rows;
         int cols = sonar_image.cols;
 
-        RCLCPP_DEBUG(this->get_logger(), "Processing sonar image: %dx%d", cols, rows);
+        // Calculate range resolution from image dimensions
+        // The sensor creates bins using np.arange(min_range, max_range, range_res)
+        // which produces approximately (max_range - min_range) / range_res bins
+        // Therefore: range_res = (max_range - min_range) / rows
+        double range_res = (max_range_ - min_range_) / static_cast<double>(rows);
+
+        RCLCPP_INFO_ONCE(this->get_logger(), 
+                        "Sonar image: %dx%d, range: %.2f-%.2fm, derived range_res: %.6fm",
+                        cols, rows, min_range_, max_range_, range_res);
 
         std::vector<std::vector<pcl::PointXYZ>> points_by_beam(cols);
 
@@ -171,7 +182,9 @@ private:
                 float intensity = sonar_image.at<float>(r, c);
 
                 // Calculate range (distance from sonar)
-                double range = (static_cast<double>(r) / rows) * max_range_;
+                // Each row r corresponds to: min_range + (r * range_res)
+                // where range_res is derived from image dimensions
+                double range = min_range_ + (r * range_res);
 
                 // Filter by minimum intensity thresholds
                 if ((range < 3.0 && intensity < min_intensity_short_range_) ||
