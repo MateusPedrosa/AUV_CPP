@@ -256,7 +256,8 @@ def generate_launch_description():
             'sonar_topic': '/oceansim/robot/imaging_sonar',
             'pose_topic': '/oceansim/robot/pose',
             'resolution': 0.1,        # 10cm voxels
-            'max_range': 3.0,        # Match your Octomap range
+            'max_range': 40.0,        # Match your Octomap range
+            'min_range': 0.1,
             'horizontal_fov': 130.0,  # Or 60.0 if using HF
             'vertical_fov': 20.0,
             'min_intensity_short_range': 0.4,
