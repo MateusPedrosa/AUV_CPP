@@ -138,93 +138,107 @@ void NBVPlannerNode::publishFrustumMarker() {
     marker.color.b = 0.0;
     marker.color.a = 0.3;
 
-    const float range  = params.sensor_max_range;
-    const float h_fov  = params.sensor_hfov;   // total horizontal FOV in radians
-    const float v_fov  = params.sensor_vfov;   // total vertical FOV in radians
+    const float r_min  = params.sensor_min_range;
+    const float r_max  = params.sensor_max_range;
+    const float h_fov  = params.sensor_hfov;
+    const float v_fov  = params.sensor_vfov;
 
-    // Resolution of the arc — tune these for speed vs. smoothness.
-    // 8x4 gives a good balance; increase for smoother, decrease for faster.
-    const int H_SEGS = 8;   // horizontal arc subdivisions
-    const int V_SEGS = 4;   // vertical arc subdivisions
+    const int H_SEGS = 8;
+    const int V_SEGS = 4;
 
     const float h_half = h_fov / 2.0f;
     const float v_half = v_fov / 2.0f;
 
-    // Build a 2D grid of points on the spherical far surface.
-    // grid[i][j] is the point at horizontal index i, vertical index j.
-    // Angles run from -h_half to +h_half and -v_half to +v_half.
-    auto arcPoint = [&](int i, int j) -> geometry_msgs::msg::Point {
-        float az = -h_half + (float)i / H_SEGS * h_fov;  // azimuth
-        float el = -v_half + (float)j / V_SEGS * v_fov;  // elevation
-
+    // Point on the spherical surface at a given range and grid index
+    auto arcPoint = [&](float range, int i, int j) -> geometry_msgs::msg::Point {
+        float az = -h_half + (float)i / H_SEGS * h_fov;
+        float el = -v_half + (float)j / V_SEGS * v_fov;
         geometry_msgs::msg::Point p;
-        // Spherical to Cartesian: X is forward (range axis)
         p.x = range * std::cos(el) * std::cos(az);
         p.y = range * std::cos(el) * std::sin(az);
         p.z = range * std::sin(el);
         return p;
     };
 
-    geometry_msgs::msg::Point apex;
-    apex.x = 0; apex.y = 0; apex.z = 0;
-
     auto& pts = marker.points;
 
     // ----------------------------------------------------------------
-    // 1. CURVED FAR SURFACE
-    //    Tessellate the spherical patch as a grid of quads (2 triangles each).
+    // 1. CURVED FAR SURFACE (r_max)
     // ----------------------------------------------------------------
     for (int i = 0; i < H_SEGS; ++i) {
         for (int j = 0; j < V_SEGS; ++j) {
-            auto p00 = arcPoint(i,     j    );
-            auto p10 = arcPoint(i + 1, j    );
-            auto p01 = arcPoint(i,     j + 1);
-            auto p11 = arcPoint(i + 1, j + 1);
+            auto p00 = arcPoint(r_max, i,     j    );
+            auto p10 = arcPoint(r_max, i + 1, j    );
+            auto p01 = arcPoint(r_max, i,     j + 1);
+            auto p11 = arcPoint(r_max, i + 1, j + 1);
 
-            // Triangle 1
-            pts.push_back(p00);
-            pts.push_back(p10);
-            pts.push_back(p11);
-
-            // Triangle 2
-            pts.push_back(p00);
-            pts.push_back(p11);
-            pts.push_back(p01);
+            pts.push_back(p00); pts.push_back(p10); pts.push_back(p11);
+            pts.push_back(p00); pts.push_back(p11); pts.push_back(p01);
         }
     }
 
     // ----------------------------------------------------------------
-    // 2. SIDE FACES (apex → each edge of the arc)
-    //    Four edges: bottom, top, left, right.
-    //    Each edge strip fans out from the apex.
+    // 2. CURVED NEAR SURFACE (r_min) — winding flipped to face inward
+    // ----------------------------------------------------------------
+    for (int i = 0; i < H_SEGS; ++i) {
+        for (int j = 0; j < V_SEGS; ++j) {
+            auto p00 = arcPoint(r_min, i,     j    );
+            auto p10 = arcPoint(r_min, i + 1, j    );
+            auto p01 = arcPoint(r_min, i,     j + 1);
+            auto p11 = arcPoint(r_min, i + 1, j + 1);
+
+            pts.push_back(p00); pts.push_back(p11); pts.push_back(p10);
+            pts.push_back(p00); pts.push_back(p01); pts.push_back(p11);
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // 3. SIDE FACES — quad strips connecting r_min arc to r_max arc
+    //    Each quad = two triangles bridging the inner and outer shells
     // ----------------------------------------------------------------
 
-    // Bottom edge (j = 0):  traverse i = 0..H_SEGS
+    // Bottom edge (j = 0)
     for (int i = 0; i < H_SEGS; ++i) {
-        pts.push_back(apex);
-        pts.push_back(arcPoint(i + 1, 0));
-        pts.push_back(arcPoint(i,     0));
+        pts.push_back(arcPoint(r_min, i,     0));
+        pts.push_back(arcPoint(r_max, i,     0));
+        pts.push_back(arcPoint(r_max, i + 1, 0));
+
+        pts.push_back(arcPoint(r_min, i,     0));
+        pts.push_back(arcPoint(r_max, i + 1, 0));
+        pts.push_back(arcPoint(r_min, i + 1, 0));
     }
 
-    // Top edge (j = V_SEGS): traverse i = 0..H_SEGS
+    // Top edge (j = V_SEGS)
     for (int i = 0; i < H_SEGS; ++i) {
-        pts.push_back(apex);
-        pts.push_back(arcPoint(i,     V_SEGS));
-        pts.push_back(arcPoint(i + 1, V_SEGS));
+        pts.push_back(arcPoint(r_min, i + 1, V_SEGS));
+        pts.push_back(arcPoint(r_max, i + 1, V_SEGS));
+        pts.push_back(arcPoint(r_max, i,     V_SEGS));
+
+        pts.push_back(arcPoint(r_min, i + 1, V_SEGS));
+        pts.push_back(arcPoint(r_max, i,     V_SEGS));
+        pts.push_back(arcPoint(r_min, i,     V_SEGS));
     }
 
-    // Left edge (i = 0): traverse j = 0..V_SEGS
+    // Left edge (i = 0)
     for (int j = 0; j < V_SEGS; ++j) {
-        pts.push_back(apex);
-        pts.push_back(arcPoint(0, j    ));
-        pts.push_back(arcPoint(0, j + 1));
+        pts.push_back(arcPoint(r_min, 0, j + 1));
+        pts.push_back(arcPoint(r_max, 0, j + 1));
+        pts.push_back(arcPoint(r_max, 0, j    ));
+
+        pts.push_back(arcPoint(r_min, 0, j + 1));
+        pts.push_back(arcPoint(r_max, 0, j    ));
+        pts.push_back(arcPoint(r_min, 0, j    ));
     }
 
-    // Right edge (i = H_SEGS): traverse j = 0..V_SEGS
+    // Right edge (i = H_SEGS)
     for (int j = 0; j < V_SEGS; ++j) {
-        pts.push_back(apex);
-        pts.push_back(arcPoint(H_SEGS, j + 1));
-        pts.push_back(arcPoint(H_SEGS, j    ));
+        pts.push_back(arcPoint(r_min, H_SEGS, j    ));
+        pts.push_back(arcPoint(r_max, H_SEGS, j    ));
+        pts.push_back(arcPoint(r_max, H_SEGS, j + 1));
+
+        pts.push_back(arcPoint(r_min, H_SEGS, j    ));
+        pts.push_back(arcPoint(r_max, H_SEGS, j + 1));
+        pts.push_back(arcPoint(r_min, H_SEGS, j + 1));
     }
 
     frustum_pub_->publish(marker);

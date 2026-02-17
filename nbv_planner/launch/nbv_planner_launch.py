@@ -52,7 +52,7 @@ def generate_launch_description():
     
     declare_exploration_sensor_min_range = DeclareLaunchArgument(
         'exploration_sensor_min_range',
-        default_value='0.2',
+        default_value='0.1',
         description='Minimum exploration sensor range in meters'
     )
     
