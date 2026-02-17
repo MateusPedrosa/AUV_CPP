@@ -117,40 +117,208 @@ NBVPlannerNode::NBVPlannerNode()
                 octomap_params.sensor_min_range, octomap_params.sensor_max_range);
 }
 
+// Publish frustum as an arc-shaped solid volume
 void NBVPlannerNode::publishFrustumMarker() {
     const auto& params = octomap_manager_->getParams();
+
     visualization_msgs::msg::Marker marker;
-    marker.header.frame_id = exploration_sensor_frame_; //TODO: get frame from params
+    marker.header.frame_id = exploration_sensor_frame_;
     marker.header.stamp = rclcpp::Time(0);
     marker.frame_locked = true;
-    marker.ns = "frustum";
+    marker.ns = "frustum_solid";
     marker.id = 0;
-    marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+    marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
     marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.scale.x = 0.02; // Line thickness
+    marker.scale.x = 1.0;
+    marker.scale.y = 1.0;
+    marker.scale.z = 1.0;
 
-    // Calculate frustum corners based on your planner params
-    float range = params.sensor_max_range;
-    float h_half = range * tan(params.sensor_hfov / 2.0);
-    float v_half = range * tan(params.sensor_vfov / 2.0);
-
-    // Define the 5 points: Origin (0,0,0) and 4 corners of the far plane
-    geometry_msgs::msg::Point p0, p1, p2, p3, p4;
-    p0.x = 0; p0.y = 0; p0.z = 0;
-    p1.x = range; p1.y = h_half; p1.z = v_half;
-    p2.x = range; p2.y = -h_half; p2.z = v_half;
-    p3.x = range; p3.y = -h_half; p3.z = -v_half;
-    p4.x = range; p4.y = h_half; p4.z = -v_half;
-
-    // Add lines from origin to corners and connecting corners...
-    marker.points = {p0, p1, p0, p2, p0, p3, p0, p4, p1, p2, p2, p3, p3, p4, p4, p1};
     marker.color.r = 0.0;
     marker.color.g = 1.0;
     marker.color.b = 0.0;
-    marker.color.a = 1.0;
+    marker.color.a = 0.3;
+
+    const float range  = params.sensor_max_range;
+    const float h_fov  = params.sensor_hfov;   // total horizontal FOV in radians
+    const float v_fov  = params.sensor_vfov;   // total vertical FOV in radians
+
+    // Resolution of the arc — tune these for speed vs. smoothness.
+    // 8x4 gives a good balance; increase for smoother, decrease for faster.
+    const int H_SEGS = 8;   // horizontal arc subdivisions
+    const int V_SEGS = 4;   // vertical arc subdivisions
+
+    const float h_half = h_fov / 2.0f;
+    const float v_half = v_fov / 2.0f;
+
+    // Build a 2D grid of points on the spherical far surface.
+    // grid[i][j] is the point at horizontal index i, vertical index j.
+    // Angles run from -h_half to +h_half and -v_half to +v_half.
+    auto arcPoint = [&](int i, int j) -> geometry_msgs::msg::Point {
+        float az = -h_half + (float)i / H_SEGS * h_fov;  // azimuth
+        float el = -v_half + (float)j / V_SEGS * v_fov;  // elevation
+
+        geometry_msgs::msg::Point p;
+        // Spherical to Cartesian: X is forward (range axis)
+        p.x = range * std::cos(el) * std::cos(az);
+        p.y = range * std::cos(el) * std::sin(az);
+        p.z = range * std::sin(el);
+        return p;
+    };
+
+    geometry_msgs::msg::Point apex;
+    apex.x = 0; apex.y = 0; apex.z = 0;
+
+    auto& pts = marker.points;
+
+    // ----------------------------------------------------------------
+    // 1. CURVED FAR SURFACE
+    //    Tessellate the spherical patch as a grid of quads (2 triangles each).
+    // ----------------------------------------------------------------
+    for (int i = 0; i < H_SEGS; ++i) {
+        for (int j = 0; j < V_SEGS; ++j) {
+            auto p00 = arcPoint(i,     j    );
+            auto p10 = arcPoint(i + 1, j    );
+            auto p01 = arcPoint(i,     j + 1);
+            auto p11 = arcPoint(i + 1, j + 1);
+
+            // Triangle 1
+            pts.push_back(p00);
+            pts.push_back(p10);
+            pts.push_back(p11);
+
+            // Triangle 2
+            pts.push_back(p00);
+            pts.push_back(p11);
+            pts.push_back(p01);
+        }
+    }
+
+    // ----------------------------------------------------------------
+    // 2. SIDE FACES (apex → each edge of the arc)
+    //    Four edges: bottom, top, left, right.
+    //    Each edge strip fans out from the apex.
+    // ----------------------------------------------------------------
+
+    // Bottom edge (j = 0):  traverse i = 0..H_SEGS
+    for (int i = 0; i < H_SEGS; ++i) {
+        pts.push_back(apex);
+        pts.push_back(arcPoint(i + 1, 0));
+        pts.push_back(arcPoint(i,     0));
+    }
+
+    // Top edge (j = V_SEGS): traverse i = 0..H_SEGS
+    for (int i = 0; i < H_SEGS; ++i) {
+        pts.push_back(apex);
+        pts.push_back(arcPoint(i,     V_SEGS));
+        pts.push_back(arcPoint(i + 1, V_SEGS));
+    }
+
+    // Left edge (i = 0): traverse j = 0..V_SEGS
+    for (int j = 0; j < V_SEGS; ++j) {
+        pts.push_back(apex);
+        pts.push_back(arcPoint(0, j    ));
+        pts.push_back(arcPoint(0, j + 1));
+    }
+
+    // Right edge (i = H_SEGS): traverse j = 0..V_SEGS
+    for (int j = 0; j < V_SEGS; ++j) {
+        pts.push_back(apex);
+        pts.push_back(arcPoint(H_SEGS, j + 1));
+        pts.push_back(arcPoint(H_SEGS, j    ));
+    }
 
     frustum_pub_->publish(marker);
 }
+
+// Publish frustum as a volume
+// void NBVPlannerNode::publishFrustumMarker() {
+//     const auto& params = octomap_manager_->getParams();
+//     visualization_msgs::msg::Marker marker;
+//     marker.header.frame_id = exploration_sensor_frame_;
+//     marker.header.stamp = rclcpp::Time(0);
+//     marker.frame_locked = true;
+//     marker.ns = "frustum_solid";
+//     marker.id = 0;
+    
+//     // Change to TRIANGLE_LIST for solid volume
+//     marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+//     marker.action = visualization_msgs::msg::Marker::ADD;
+    
+//     // Scale for TRIANGLE_LIST is 1.0 (it doesn't affect thickness)
+//     marker.scale.x = 1.0;
+//     marker.scale.y = 1.0;
+//     marker.scale.z = 1.0;
+
+//     float range = params.sensor_max_range;
+//     float h_half = range * tan(params.sensor_hfov / 2.0);
+//     float v_half = range * tan(params.sensor_vfov / 2.0);
+
+//     geometry_msgs::msg::Point p0, p1, p2, p3, p4;
+//     p0.x = 0; p0.y = 0; p0.z = 0;              // Apex (Origin)
+//     p1.x = range; p1.y =  h_half; p1.z =  v_half; // Top Left (Far)
+//     p2.x = range; p2.y = -h_half; p2.z =  v_half; // Top Right (Far)
+//     p3.x = range; p3.y = -h_half; p3.z = -v_half; // Bottom Right (Far)
+//     p4.x = range; p4.y =  h_half; p4.z = -v_half; // Bottom Left (Far)
+
+//     // Define the 6 triangles (3 points each)
+//     marker.points = {
+//         // Top Face
+//         p0, p1, p2,
+//         // Right Face
+//         p0, p2, p3,
+//         // Bottom Face
+//         p0, p3, p4,
+//         // Left Face
+//         p0, p4, p1,
+//         // Far Plane (Rectangle made of two triangles)
+//         p1, p3, p2,
+//         p1, p4, p3
+//     };
+
+//     // Semi-transparent Green
+//     marker.color.r = 0.0;
+//     marker.color.g = 1.0;
+//     marker.color.b = 0.0;
+//     marker.color.a = 0.3; // Alpha < 1.0 makes it transparent
+
+//     frustum_pub_->publish(marker);
+// }
+
+// Publish frustum as a wireframe
+// void NBVPlannerNode::publishFrustumMarker() {
+//     const auto& params = octomap_manager_->getParams();
+//     visualization_msgs::msg::Marker marker;
+//     marker.header.frame_id = exploration_sensor_frame_; //TODO: get frame from params
+//     marker.header.stamp = rclcpp::Time(0);
+//     marker.frame_locked = true;
+//     marker.ns = "frustum";
+//     marker.id = 0;
+//     marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+//     marker.action = visualization_msgs::msg::Marker::ADD;
+//     marker.scale.x = 0.02; // Line thickness
+
+//     // Calculate frustum corners based on your planner params
+//     float range = params.sensor_max_range;
+//     float h_half = range * tan(params.sensor_hfov / 2.0);
+//     float v_half = range * tan(params.sensor_vfov / 2.0);
+
+//     // Define the 5 points: Origin (0,0,0) and 4 corners of the far plane
+//     geometry_msgs::msg::Point p0, p1, p2, p3, p4;
+//     p0.x = 0; p0.y = 0; p0.z = 0;
+//     p1.x = range; p1.y = h_half; p1.z = v_half;
+//     p2.x = range; p2.y = -h_half; p2.z = v_half;
+//     p3.x = range; p3.y = -h_half; p3.z = -v_half;
+//     p4.x = range; p4.y = h_half; p4.z = -v_half;
+
+//     // Add lines from origin to corners and connecting corners...
+//     marker.points = {p0, p1, p0, p2, p0, p3, p0, p4, p1, p2, p2, p3, p3, p4, p4, p1};
+//     marker.color.r = 0.0;
+//     marker.color.g = 1.0;
+//     marker.color.b = 0.0;
+//     marker.color.a = 1.0;
+
+//     frustum_pub_->publish(marker);
+// }
 
 void NBVPlannerNode::publishInspectionFrustumMarker(const std::string& frame_id) {
     visualization_msgs::msg::Marker marker;
