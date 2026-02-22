@@ -1,0 +1,47 @@
+# NBV Planner Parameters
+nbv_planner:
+  ros__parameters:
+    map_frame: "map"
+    robot_frame: "base_link"
+    octree_resolution: 0.1
+    planning_frequency: 0.5
+    exploration_sensor_max_range: 40.0
+    exploration_sensor_min_range: 0.2
+    max_free_space: 0.0
+    min_height_free_space: 0.0
+    exploration_sensor_hfov: 2.2689  # 130 deg in rad
+    exploration_sensor_vfov: 0.3491  # 20 deg in rad
+    inspection_sensor_frames: ["camera_forward_link", "camera_bottom_link"]
+    exploration_sensor_frame: "sonar_link"
+    camera_fx: 731.79
+    camera_fy: 731.79
+    camera_cx: 970.94
+    camera_cy: 600.37
+    camera_width: 1216
+    camera_height: 1936
+    camera_max_range: 2.0
+    cloud_topic: "/sonar_point_cloud"
+
+# Sonar Point Cloud Node Parameters
+sonar_point_cloud_node:
+  ros__parameters:
+    sonar_topic: "/oceansim/robot/imaging_sonar"
+    pose_topic: "/oceansim/robot/pose"
+    resolution: 0.1
+    max_range: 40.0
+    min_range: 0.1
+    horizontal_fov: 130.0
+    vertical_fov: 20.0
+    min_intensity_short_range: 0.4
+    min_intensity_long_range: 0.2
+    use_sim_time: false
+
+# Parameters for the Sonar Static Transform
+sonar_static_tf:
+  ros__parameters:
+    sonar_x: 0.3
+    sonar_y: 0.0
+    sonar_z: 0.3
+    sonar_roll: 0.0
+    sonar_pitch: 0.7854  # 45 deg in rad
+    sonar_yaw: 0.0

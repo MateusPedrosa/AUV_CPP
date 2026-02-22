@@ -10,7 +10,7 @@ from launch.conditions import IfCondition
 def generate_launch_description():
     # 1. Get the path to your config file
     pkg_share = get_package_share_directory('nbv_planner')
-    default_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params.yaml')
+    default_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oculus_1200d.yaml')
 
     # 2. Add a Launch Argument so you can swap the YAML file easily
     declare_params_file = DeclareLaunchArgument(
@@ -22,7 +22,7 @@ def generate_launch_description():
     # Declare launch arguments
     declare_map_frame = DeclareLaunchArgument(
         'map_frame',
-        default_value='map',
+        default_value='odom',
         description='Frame ID for the map'
     )
     
@@ -46,7 +46,7 @@ def generate_launch_description():
     
     declare_exploration_sensor_max_range = DeclareLaunchArgument(
         'exploration_sensor_max_range',
-        default_value='40.0',
+        default_value='10.0',
         description='Maximum exploration sensor range in meters'
     )
     
@@ -140,6 +140,13 @@ def generate_launch_description():
         description='Input point cloud topic'
     )
 
+    declare_sonar_x = DeclareLaunchArgument('sonar_x', default_value='0.3')
+    declare_sonar_y = DeclareLaunchArgument('sonar_y', default_value='0.0')
+    declare_sonar_z = DeclareLaunchArgument('sonar_z', default_value='0.3')
+    declare_sonar_roll = DeclareLaunchArgument('sonar_roll', default_value='0.0')
+    declare_sonar_pitch = DeclareLaunchArgument('sonar_pitch', default_value='0.0')
+    declare_sonar_yaw = DeclareLaunchArgument('sonar_yaw', default_value='0.0')
+
     #################################
     
     declare_use_rviz = DeclareLaunchArgument(
@@ -160,7 +167,6 @@ def generate_launch_description():
     nbv_planner_node = Node(
         package='nbv_planner',
         executable='nbv_planner_node',
-        name='nbv_planner',
         # prefix=['xterm -e gdb -ex run --args'],
         output='screen',
         parameters=[
@@ -205,15 +211,17 @@ def generate_launch_description():
     static_transform_publisher_sonar_node = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
+        # We reference the arguments from the LaunchConfigurations 
+        # defined at the top of your file
         arguments=[
-            '--x', '0.3',
-            '--y', '0.0',
-            '--z', '0.3',
-            '--roll', '0.0',
-            '--pitch', '0.785398',  # 45 degrees in radians
-            '--yaw', '0.0',
-            '--frame-id', 'base_link',
-            '--child-frame-id', 'sonar_link'
+            '--x', LaunchConfiguration('sonar_x'),
+            '--y', LaunchConfiguration('sonar_y'),
+            '--z', LaunchConfiguration('sonar_z'),
+            '--roll', LaunchConfiguration('sonar_roll'),
+            '--pitch', LaunchConfiguration('sonar_pitch'),
+            '--yaw', LaunchConfiguration('sonar_yaw'),
+            '--frame-id', LaunchConfiguration('robot_frame'),
+            '--child-frame-id', LaunchConfiguration('exploration_sensor_frame')
         ]
     )
 
@@ -253,17 +261,27 @@ def generate_launch_description():
         name='sonar_point_cloud_node',
         output='screen',
         parameters=[{
-            'sonar_topic': '/oceansim/robot/imaging_sonar',
-            'pose_topic': '/oceansim/robot/pose',
+            'sonar_topic': '/blueye/sensor/sonar/ping',
+            'pose_topic': '/blueye/sensor/ekf/pose',
             'resolution': 0.1,        # 10cm voxels
-            'max_range': 40.0,        # Match your Octomap range
+            'max_range': 10.0,        # Match your Octomap range
             'min_range': 0.1,
-            'horizontal_fov': 130.0,  # Or 60.0 if using HF
-            'vertical_fov': 20.0,
+            'horizontal_fov': 60.0,  # Or 60.0 if using HF
+            'vertical_fov': 12.0,
             'min_intensity_short_range': 0.4,
             'min_intensity_long_range': 0.2,
-            'use_sim_time': True,
+            'use_sim_time': False,
         }],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+    )
+
+    sonar_point_cloud_node = Node(
+        package='sonar_mapping',
+        executable='sonar_point_cloud',
+        name='sonar_point_cloud_node',
+        output='screen',
+        # This now loads the parameters from the YAML file passed to the launch script
+        parameters=[LaunchConfiguration('params_file')],
         arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
@@ -292,7 +310,13 @@ def generate_launch_description():
         declare_cloud_topic,
         declare_use_rviz,
         declare_log_level,
-        
+        declare_sonar_x,
+        declare_sonar_y,
+        declare_sonar_z,
+        declare_sonar_roll,
+        declare_sonar_pitch,
+        declare_sonar_yaw,
+
         # Launch nodes
         nbv_planner_node,
         rviz_node,
