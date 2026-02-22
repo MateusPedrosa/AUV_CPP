@@ -82,11 +82,18 @@ NBVPlannerNode::NBVPlannerNode()
     qos.reliability(rclcpp::ReliabilityPolicy::BestEffort);
     
     // Create subscribers
-    point_cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "cloud_in",
-        qos,
-        std::bind(&NBVPlannerNode::pointCloudCallback, this, std::placeholders::_1)
+    point_cloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>();
+    point_cloud_sub_->subscribe(this, "cloud_in", qos.get_rmw_qos_profile());
+    tf2_filter_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
+        *point_cloud_sub_, 
+        *tf2_buffer_, 
+        map_frame_, 
+        10,
+        this->get_node_logging_interface(),
+        this->get_node_clock_interface(),
+        buffer_timeout
     );
+    tf2_filter_->registerCallback(&NBVPlannerNode::pointCloudCallback, this);
     
     // Create publishers
     goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
@@ -379,7 +386,7 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
         t_exploration_sensor = tf2_buffer_->lookupTransform(
             map_frame_,
             msg->header.frame_id, // Point cloud should be published in the exploration sensor frame
-            tf2::TimePointZero);
+            msg->header.stamp);
         // Convert to Eigen transform
         Eigen::Isometry3d T_G_exploration_sensor = tf2::transformToEigen(t_exploration_sensor);
 
@@ -397,7 +404,8 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
             t_inspection_sensor = tf2_buffer_->lookupTransform(
                 map_frame_,
                 inspection_sensor_frame,
-                tf2::TimePointZero);
+                msg->header.stamp,
+                tf2::durationFromSec(0.1)); // 100 ms timeout for this lookup
             // Convert to Eigen transform
             Eigen::Isometry3d T_G_inspection_sensor = tf2::transformToEigen(t_inspection_sensor);
 
@@ -407,7 +415,7 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
         }
         
         received_first_cloud_ = true;
-
+        
         // Publish visualization
         publishOctomapMarkers();
         

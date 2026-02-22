@@ -15,6 +15,7 @@ find_package(pcl_conversions REQUIRED)
 #find_package(message_filters REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(oculus_interfaces REQUIRED)
 
 add_executable(sonar_point_cloud src/sonar_point_cloud.cpp)
 target_include_directories(sonar_point_cloud PUBLIC
@@ -23,6 +24,7 @@ target_include_directories(sonar_point_cloud PUBLIC
 target_link_libraries(sonar_point_cloud
   ${PCL_LIBRARIES}
   ${OpenCV_LIBRARIES}
+  oculus_interfaces::oculus_interfaces__rosidl_typesupport_cpp
 )
 ament_target_dependencies(sonar_point_cloud
   rclcpp

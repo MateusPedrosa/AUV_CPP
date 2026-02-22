@@ -7,9 +7,10 @@
 #include <pcl/filters/radius_outlier_removal.h>
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
-#include <oculus_interfaces/msg/oculus_ping.hpp>
+#include <sensor_msgs/msg/image.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 
+#include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/opencv.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -17,6 +18,8 @@
 using namespace std::chrono_literals;
 
 using std::placeholders::_1;
+
+// TODO: use OculusPing message type
 
 class SonarPointCloud : public rclcpp::Node
 {
@@ -61,21 +64,21 @@ public:
         // TODO: check qos
         rclcpp::QoS qos_profile(1);
         qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
-        qos_profile.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+        qos_profile.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
         point_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("sonar_point_cloud", qos_profile);
 
         rclcpp::QoS qos(1);
         qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
         qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
-        sonar_subscriber_ = this->create_subscription<oculus_interfaces::msg::OculusPing>(
+        sonar_subscriber_ = this->create_subscription<sensor_msgs::msg::Image>(
             sonar_topic, qos,
-            std::bind(&SonarPointCloud::pingCallback, this, _1)
+            std::bind(&SonarPointCloud::convertImageToPointCloud, this, _1)
         );
     }
 
 private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_pub_;
-    rclcpp::Subscription<oculus_interfaces::msg::OculusPing>::SharedPtr sonar_subscriber_;
+    rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sonar_subscriber_;
     double resolution_;
     double min_range_;
     double max_range_;
@@ -116,7 +119,8 @@ private:
      * @return pcl::PointCloud<pcl::PointXYZ> Filtered point cloud
      * * @note Source: "ROV-Based Autonomous Maneuvering for Ship Hull Inspection with Coverage Monitoring" (Cardaillac, A. et al.) - Equations 54 and 55
      */
-    pcl::PointCloud<pcl::PointXYZ> filterPointCloud(const std::vector<std::vector<pcl::PointXYZ>>& points_by_beam) {
+    pcl::PointCloud<pcl::PointXYZ> filterPointCloud(
+        const std::vector<std::vector<pcl::PointXYZ>>& points_by_beam) {
         pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
 
         int num_beams = points_by_beam.size();
@@ -168,127 +172,105 @@ private:
         return filtered_cloud;
     }
 
-    void pingCallback(const oculus_interfaces::msg::OculusPing::ConstSharedPtr& ping_msg) {
-        const uint16_t n_beams  = ping_msg->n_beams;
-        const uint16_t n_ranges = ping_msg->n_ranges;
-
-        if (n_beams == 0 || n_ranges == 0) {
-            RCLCPP_WARN(this->get_logger(), "Received ping with zero beams or ranges, skipping.");
+    void convertImageToPointCloud(const sensor_msgs::msg::Image::ConstSharedPtr & img_msg) {
+        // Convert ROS Image to OpenCV Mat
+        cv_bridge::CvImagePtr cv_ptr;
+        try {
+            cv_ptr = cv_bridge::toCvCopy(img_msg, sensor_msgs::image_encodings::TYPE_32FC1);
+        } catch (cv_bridge::Exception& e) {
+            RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
             return;
         }
 
-        // ---- Range resolution ----
-        // ping_msg->range is the configured maximum range (metres).
-        // range_res = range / n_ranges.
-        // Fall back to max_range_ parameter if the field is zero.
-        double total_range = ping_msg->range > 0.0 ? ping_msg->range : max_range_;
-        double range_res   = total_range / static_cast<double>(n_ranges);
+        cv::Mat sonar_image = cv_ptr->image;
+        int rows = sonar_image.rows;
+        int cols = sonar_image.cols;
 
-        // ---- Bearing array ----
-        // Use them directly when available; fall back to uniform distribution over h_fov.
-        std::vector<double> bearings(n_beams);
-        if (static_cast<uint16_t>(ping_msg->bearings.size()) == n_beams) {
-            for (uint16_t b = 0; b < n_beams; b++) {
-                bearings[b] = static_cast<double>(ping_msg->bearings[b]) * M_PI / 180.0;
-            }
-        } else {
-            RCLCPP_WARN_ONCE(this->get_logger(),
-                             "Bearings array size (%zu) does not match n_beams (%u). "
-                             "Falling back to uniform FOV distribution.",
-                             ping_msg->bearings.size(), n_beams);
-            for (uint16_t b = 0; b < n_beams; b++) {
-                bearings[b] = (static_cast<double>(b) / (n_beams - 1) - 0.5) * h_fov_;
-            }
-        }
+        // Calculate range resolution from image dimensions
+        // The sensor creates bins using np.arange(min_range, max_range, range_res)
+        // which produces approximately (max_range - min_range) / range_res bins
+        // Therefore: range_res = (max_range - min_range) / rows
+        double range_res = (max_range_ - min_range_) / static_cast<double>(rows);
 
-        // ---- Decode raw uint8 ping data ----
-        // Data layout: n_ranges × n_beams, row-major.
-        // ping_msg->step gives the number of bytes per sample.
-        const size_t  bytes_per_sample = (ping_msg->step > 0) ? (ping_msg->step / n_beams) : 1;
-        const size_t  expected_bytes   = static_cast<size_t>(n_ranges) * ping_msg->step;
+        RCLCPP_INFO_ONCE(this->get_logger(), 
+                        "Sonar image: %dx%d, range: %.2f-%.2fm, derived range_res: %.6fm",
+                        cols, rows, min_range_, max_range_, range_res);
 
-        if (ping_msg->data.size() < expected_bytes) {
-            RCLCPP_WARN(this->get_logger(),
-                        "Ping data size mismatch: expected %zu bytes, got %zu. Skipping.",
-                        expected_bytes, ping_msg->data.size());
-            return;
-        }
+        std::vector<std::vector<pcl::PointXYZ>> points_by_beam(cols);
 
-        RCLCPP_INFO_ONCE(this->get_logger(),
-                         "First ping: n_beams=%u, n_ranges=%u, range=%.2f m, range_res=%.6f m, "
-                         "step=%u, frequency=%.0f Hz, gain=%.1f",
-                         n_beams, n_ranges, total_range, range_res,
-                         bytes_per_sample, ping_msg->frequency, ping_msg->gain);
+        // M750d produces 2D range-bearing data at constant depth
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                float intensity = sonar_image.at<float>(r, c);
 
-        const double max_intensity = (bytes_per_sample == 2) ? 65535.0 : 255.0;
+                // Calculate range (distance from sonar)
+                // Each row r corresponds to: min_range + (r * range_res)
+                // where range_res is derived from image dimensions
+                double range = min_range_ + (r * range_res);
 
-        // ---- Build points_by_beam ----
-        std::vector<std::vector<pcl::PointXYZ>> points_by_beam(n_beams);
-
-        for (uint16_t r = 0; r < n_ranges; r++) {
-            double range = r * range_res;
-            if (range < min_range_ || range > max_range_) continue;
-
-            for (uint16_t b = 0; b < n_beams; b++) {
-                size_t idx = (static_cast<size_t>(r) * n_beams + b) * bytes_per_sample;
-
-                double raw_val = 0.0;
-                if (bytes_per_sample == 2) {
-                    raw_val = static_cast<double>(
-                        static_cast<uint16_t>(ping_msg->data[idx]) |
-                        (static_cast<uint16_t>(ping_msg->data[idx + 1]) << 8));
-                } else {
-                    raw_val = static_cast<double>(ping_msg->data[idx]);
-                }
-                double intensity = raw_val / max_intensity;  // normalise to [0, 1]
-
-                if (range > 3.0) {
-                    continue;
-                }
-
-                // Intensity thresholds (short range / long range)
+                // Filter by minimum intensity thresholds
                 if ((range < 3.0 && intensity < min_intensity_short_range_) ||
                     (range >= 3.0 && intensity < min_intensity_long_range_)) {
                     continue;
                 }
 
+                // if (range > 5.0) {
+                //     continue; // Skip points outside valid range
+                // }
+
+                // Calculate bearing angle (horizontal)
+                // Assuming center column is 0 degrees, spreading across h_fov
+                double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
+
                 // Frame: X=Forward, Y=Left, Z=Up
-                double bearing = bearings[b];
-                pcl::PointXYZ pt;
-                pt.x = static_cast<float>(range * std::cos(bearing));
-                pt.y = static_cast<float>(range * std::sin(bearing));
-                pt.z = 0.0f;  // 2D sonar: assume constant depth plane
-                points_by_beam[b].push_back(pt);
+                double x = range * cos(bearing);
+                double y = range * sin(bearing);
+                double z = 0.0; // Assuming flat plane at sonar depth
+
+                pcl::PointXYZ point;
+                point.x = x;
+                point.y = y;
+                point.z = z;
+
+                points_by_beam[c].push_back(point);
             }
         }
 
-        // ---- Count before filtering ----
-        size_t total_before = 0;
-        for (const auto& beam : points_by_beam) total_before += beam.size();
+        // Count total points before filtering
+        size_t total_points_before = 0;
+        for (const auto& beam : points_by_beam) {
+            total_points_before += beam.size();
+        }
 
-        // ---- Apply filters ----
-        pcl::PointCloud<pcl::PointXYZ> window_filtered = filterPointCloud(points_by_beam);
-        pcl::PointCloud<pcl::PointXYZ>::Ptr window_filtered_ptr = window_filtered.makeShared();
-        pcl::PointCloud<pcl::PointXYZ>::Ptr final_cloud = applyRadiusFilter(window_filtered_ptr);
+        pcl::PointCloud<pcl::PointXYZ> window_filtered_cloud = filterPointCloud(points_by_beam);
 
-        // ---- Logging ----
-        size_t total_after   = final_cloud->size();
-        size_t total_removed = total_before - total_after;
-        double pct = total_before > 0 ? 100.0 * total_removed / total_before : 0.0;
-        RCLCPP_DEBUG(this->get_logger(),
-                     "Filtering: %zu → %zu points (removed %zu, %.1f%%)",
-                     total_before, total_after, total_removed, pct);
+        pcl::PointCloud<pcl::PointXYZ>::Ptr window_filtered_cloud_ptr = window_filtered_cloud.makeShared();
+        pcl::PointCloud<pcl::PointXYZ>::Ptr final_cloud = applyRadiusFilter(window_filtered_cloud_ptr);
 
-        // ---- Publish ----
+        final_cloud->header.frame_id = "sonar_link";
+
+        RCLCPP_DEBUG(this->get_logger(), "Filtered cloud from %zu beams to %zu points", points_by_beam.size(), final_cloud->size());
+
+        size_t points_after = final_cloud->size();
+        size_t points_removed = total_points_before - points_after;
+        double filter_percentage = total_points_before > 0 ? 
+            (100.0 * points_removed / total_points_before) : 0.0;
+
+        RCLCPP_DEBUG(this->get_logger(), 
+                    "Filtering: %zu points before -> %zu points after (removed %zu points, %.1f%%)",
+                    total_points_before, points_after, points_removed, filter_percentage);
+
+        // Publish filtered point cloud
         if (!final_cloud->empty()) {
-            sensor_msgs::msg::PointCloud2 out_msg;
-            pcl::toROSMsg(*final_cloud, out_msg);
-            out_msg.header.frame_id = "sonar_link";
-            out_msg.header.stamp = ping_msg->header.stamp;
-            point_cloud_pub_->publish(out_msg);
-            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", total_after);
+            sensor_msgs::msg::PointCloud2 output_msg;
+            pcl::toROSMsg(*final_cloud, output_msg);
+            output_msg.header.frame_id = "sonar_link";
+            output_msg.header.stamp = this->now();
+
+            point_cloud_pub_->publish(output_msg);
+            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", final_cloud->size());
         } else {
-            RCLCPP_WARN(this->get_logger(), "Point cloud is empty after filtering, nothing to publish.");
+            RCLCPP_WARN(this->get_logger(), "Point cloud is empty, nothing to publish.");
         }
     }
 };
