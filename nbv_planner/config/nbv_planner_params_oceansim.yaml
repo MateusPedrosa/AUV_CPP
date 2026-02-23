@@ -1,5 +1,5 @@
 # NBV Planner Parameters
-nbv_planner:
+nbv_planner_node:
   ros__parameters:
     map_frame: "map"
     robot_frame: "base_link"
@@ -36,12 +36,12 @@ sonar_point_cloud_node:
     min_intensity_long_range: 0.2
     use_sim_time: false
 
-# Parameters for the Sonar Static Transform
-sonar_static_tf:
-  ros__parameters:
-    sonar_x: 0.3
-    sonar_y: 0.0
-    sonar_z: 0.3
-    sonar_roll: 0.0
-    sonar_pitch: 0.7854  # 45 deg in rad
-    sonar_yaw: 0.0
+# # Parameters for the Sonar Static Transform
+# sonar_static_tf:
+#   ros__parameters:
+#     sonar_x: 0.3
+#     sonar_y: 0.0
+#     sonar_z: 0.3
+#     sonar_roll: 0.0
+#     sonar_pitch: 0.7854  # 45 deg in rad
+#     sonar_yaw: 0.0

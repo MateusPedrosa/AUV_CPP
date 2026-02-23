@@ -1,5 +1,5 @@
 # NBV Planner Parameters
-nbv_planner:
+nbv_planner_node:
   ros__parameters:
     map_frame: "odom"
     robot_frame: "base_link"
@@ -23,7 +23,7 @@ nbv_planner:
     cloud_topic: "/sonar_point_cloud"
 
 # Sonar Point Cloud Node Parameters
-sonar_point_cloud_node:
+sonar_point_cloud:
   ros__parameters:
     sonar_topic: "/blueye/sensor/sonar/ping"
     pose_topic: "/blueye/sensor/ekf/pose"
@@ -35,13 +35,3 @@ sonar_point_cloud_node:
     min_intensity_short_range: 0.4
     min_intensity_long_range: 0.2
     use_sim_time: false
-
-# Parameters for the Sonar Static Transform
-sonar_static_tf:
-  ros__parameters:
-    sonar_x: 0.3
-    sonar_y: 0.0
-    sonar_z: 0.3
-    sonar_roll: 0.0
-    sonar_pitch: 0.0
-    sonar_yaw: 0.0
