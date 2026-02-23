@@ -242,10 +242,6 @@ private:
                 }
                 double intensity = raw_val / max_intensity;  // normalise to [0, 1]
 
-                if (range > 3.0) {
-                    continue;
-                }
-
                 // Intensity thresholds (short range / long range)
                 if ((range < 3.0 && intensity < min_intensity_short_range_) ||
                     (range >= 3.0 && intensity < min_intensity_long_range_)) {
