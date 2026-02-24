@@ -35,3 +35,13 @@ sonar_point_cloud:
     min_intensity_short_range: 0.4
     min_intensity_long_range: 0.2
     use_sim_time: false
+
+sonar_tf_publisher_node:
+  ros__parameters:
+    use_sim_time: true
+    pitch_topic: "/blueye/sensor/sonar/servo_angle"
+    sonar_frame: "sonar_link"
+    robot_frame: "base_link"
+    translation_x: 0.1
+    translation_y: 0.0
+    translation_z: 0.2

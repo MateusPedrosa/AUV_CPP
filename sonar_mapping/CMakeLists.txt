@@ -16,6 +16,9 @@ find_package(pcl_conversions REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(oculus_interfaces REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(blueye_interfaces REQUIRED)
 
 add_executable(sonar_point_cloud src/sonar_point_cloud.cpp)
 target_include_directories(sonar_point_cloud PUBLIC
@@ -35,6 +38,15 @@ ament_target_dependencies(sonar_point_cloud
   #message_filters
 )
 
+add_executable(sonar_tf_publisher src/sonar_tf_publisher.cpp)
+ament_target_dependencies(sonar_tf_publisher
+  rclcpp
+  geometry_msgs
+  blueye_interfaces
+  tf2_ros
+  tf2
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -49,6 +61,7 @@ endif()
 
 install(TARGETS
   sonar_point_cloud
+  sonar_tf_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
 

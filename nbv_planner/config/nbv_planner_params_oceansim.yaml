@@ -45,3 +45,12 @@ sonar_point_cloud_node:
 #     sonar_roll: 0.0
 #     sonar_pitch: 0.7854  # 45 deg in rad
 #     sonar_yaw: 0.0
+
+# sonar_tf_publisher_node:
+#   ros__parameters:
+#     pitch_topic: "/servo/pitch_angle"
+#     sonar_frame: "sonar_link"
+#     robot_frame: "base_link"
+#     translation_x: 0.3
+#     translation_y: 0.0
+#     translation_z: 0.3
