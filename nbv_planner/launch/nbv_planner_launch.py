@@ -63,19 +63,27 @@ def generate_launch_description():
         output='screen'
     )
 
-    static_transform_publisher_sonar_node = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        arguments=[
-            '--x',           '0.1',
-            '--y',           '0.0',
-            '--z',           '0.2',
-            '--roll',        '0.0',
-            '--pitch',       '0.0',
-            '--yaw',         '0.0',
-            '--frame-id',    'base_link',
-            '--child-frame-id', 'sonar_link'
-        ]
+    # static_transform_publisher_sonar_node = Node(
+    #     package='tf2_ros',
+    #     executable='static_transform_publisher',
+    #     arguments=[
+    #         '--x',           '0.1',
+    #         '--y',           '0.0',
+    #         '--z',           '0.2',
+    #         '--roll',        '0.0',
+    #         '--pitch',       '0.0',
+    #         '--yaw',         '0.0',
+    #         '--frame-id',    'base_link',
+    #         '--child-frame-id', 'sonar_link'
+    #     ]
+    # )
+
+    sonar_tf_publisher_node = Node(
+        package='sonar_mapping',
+        executable='sonar_tf_publisher',
+        output='screen',
+        parameters=[LaunchConfiguration('params_file')],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
     static_transform_publisher_forward_camera_node = Node(
@@ -127,8 +135,9 @@ def generate_launch_description():
         # Launch nodes
         nbv_planner_node,
         rviz_node,
-        static_transform_publisher_sonar_node,
+        # static_transform_publisher_sonar_node,
         static_transform_publisher_forward_camera_node,
         static_transform_publisher_bottom_camera_node,
         sonar_point_cloud_node,
+        sonar_tf_publisher_node,
     ])
