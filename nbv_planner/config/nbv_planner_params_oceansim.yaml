@@ -34,7 +34,7 @@ sonar_point_cloud_node:
     vertical_fov: 20.0
     min_intensity_short_range: 0.4
     min_intensity_long_range: 0.2
-    use_sim_time: false
+    use_sim_time: true
 
 # # Parameters for the Sonar Static Transform
 # sonar_static_tf:
@@ -54,3 +54,13 @@ sonar_point_cloud_node:
 #     translation_x: 0.3
 #     translation_y: 0.0
 #     translation_z: 0.3
+
+sonar_tf_publisher:
+  ros__parameters:
+    use_sim_time: true
+    pitch_topic: "/oceansim/robot/sonar_pitch"
+    sonar_frame: "sonar_link"
+    robot_frame: "base_link"
+    translation_x: 0.3
+    translation_y: 0.0
+    translation_z: 0.3

@@ -34,9 +34,9 @@ sonar_point_cloud:
     vertical_fov: 12.0
     min_intensity_short_range: 0.4
     min_intensity_long_range: 0.2
-    use_sim_time: false
+    use_sim_time: true
 
-sonar_tf_publisher_node:
+sonar_tf_publisher:
   ros__parameters:
     use_sim_time: true
     pitch_topic: "/blueye/sensor/sonar/servo_angle"
