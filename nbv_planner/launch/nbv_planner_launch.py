@@ -4,19 +4,25 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 
 
 def generate_launch_description():
     # 1. Get the path to your config file
     pkg_share = get_package_share_directory('nbv_planner')
-    default_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oculus_1200d.yaml')
+    default_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oceansim.yaml')
 
     # 2. Add a Launch Argument so you can swap the YAML file easily
     declare_params_file = DeclareLaunchArgument(
         'params_file',
         default_value=default_params_path,
         description='Full path to the ROS2 parameters file to use'
+    )
+
+    declare_simulator = DeclareLaunchArgument(
+        'simulator',
+        default_value='false',
+        description='If true, runs sonar_point_cloud_oceansim. If false, runs sonar_point_cloud.'
     )
 
     declare_cloud_topic = DeclareLaunchArgument(
@@ -129,7 +135,17 @@ def generate_launch_description():
         package='sonar_mapping',
         executable='sonar_point_cloud',
         output='screen',
-        # This now loads the parameters from the YAML file passed to the launch script
+        condition=UnlessCondition(LaunchConfiguration('simulator')),
+        parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+    )
+
+    # Simulator Sonar Node (Runs if simulator is true)
+    sonar_point_cloud_oceansim_node = Node(
+        package='sonar_mapping',
+        executable='sonar_point_cloud_oceansim',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('simulator')),
         parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
@@ -137,6 +153,7 @@ def generate_launch_description():
     return LaunchDescription([
         # Declare arguments
         declare_params_file,
+        declare_simulator,
         declare_cloud_topic,
         declare_use_rviz,
         declare_log_level,
@@ -149,5 +166,6 @@ def generate_launch_description():
         static_transform_publisher_forward_camera_node,
         static_transform_publisher_bottom_camera_node,
         sonar_point_cloud_node,
+        sonar_point_cloud_oceansim_node,
         sonar_tf_publisher_node,
     ])

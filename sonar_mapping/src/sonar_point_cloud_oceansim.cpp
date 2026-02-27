@@ -24,7 +24,7 @@ using std::placeholders::_1;
 class SonarPointCloud : public rclcpp::Node
 {
 public:
-    SonarPointCloud() : Node("sonar_point_cloud") {
+    SonarPointCloud() : Node("sonar_point_cloud_oceansim") {
         // Parameters
         this->declare_parameter("sonar_topic", "/oceansim/robot/imaging_sonar");
         this->declare_parameter("pose_topic", "/oceansim/robot/pose");

@@ -47,6 +47,23 @@ ament_target_dependencies(sonar_tf_publisher
   tf2
 )
 
+add_executable(sonar_point_cloud_oceansim src/sonar_point_cloud_oceansim.cpp)
+target_include_directories(sonar_point_cloud_oceansim PUBLIC
+  ${PCL_INCLUDE_DIRS}
+)
+target_link_libraries(sonar_point_cloud_oceansim
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+  oculus_interfaces::oculus_interfaces__rosidl_typesupport_cpp
+)
+ament_target_dependencies(sonar_point_cloud_oceansim
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  cv_bridge
+  pcl_conversions
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -61,6 +78,7 @@ endif()
 
 install(TARGETS
   sonar_point_cloud
+  sonar_point_cloud_oceansim
   sonar_tf_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
