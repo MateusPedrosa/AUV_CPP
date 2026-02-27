@@ -25,6 +25,12 @@ def generate_launch_description():
         description='Input point cloud topic'
     )
 
+    declare_use_sim_time = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='true', # Set to true since you are using MCAP playback
+        description='Use simulation (log) clock if true'
+    )
+
     #################################
     
     declare_use_rviz = DeclareLaunchArgument(
@@ -47,7 +53,7 @@ def generate_launch_description():
         executable='nbv_planner_node',
         # prefix=['xterm -e gdb -ex run --args'],
         output='screen',
-        parameters=[LaunchConfiguration('params_file')],
+        parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         remappings=[
             ('cloud_in', LaunchConfiguration('cloud_topic')),
         ]
@@ -58,6 +64,7 @@ def generate_launch_description():
         package='rviz2',
         executable='rviz2',
         name='rviz2',
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
         arguments=['-d', '$(find nbv_planner)/rviz/nbv_planner.rviz'],
         condition=IfCondition(LaunchConfiguration('use_rviz')),
         output='screen'
@@ -82,7 +89,7 @@ def generate_launch_description():
         package='sonar_mapping',
         executable='sonar_tf_publisher',
         output='screen',
-        parameters=[LaunchConfiguration('params_file')],
+        parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
@@ -98,7 +105,8 @@ def generate_launch_description():
             '--yaw', '0.0',
             '--frame-id', 'base_link',
             '--child-frame-id', 'camera_forward_link'
-        ]
+        ],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}]
     )
 
     static_transform_publisher_bottom_camera_node = Node(
@@ -113,7 +121,8 @@ def generate_launch_description():
             '--yaw', '0.0',
             '--frame-id', 'base_link',
             '--child-frame-id', 'camera_bottom_link'
-        ]
+        ],
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}]
     )
 
     sonar_point_cloud_node = Node(
@@ -121,7 +130,7 @@ def generate_launch_description():
         executable='sonar_point_cloud',
         output='screen',
         # This now loads the parameters from the YAML file passed to the launch script
-        parameters=[LaunchConfiguration('params_file')],
+        parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
@@ -131,6 +140,7 @@ def generate_launch_description():
         declare_cloud_topic,
         declare_use_rviz,
         declare_log_level,
+        declare_use_sim_time,
 
         # Launch nodes
         nbv_planner_node,

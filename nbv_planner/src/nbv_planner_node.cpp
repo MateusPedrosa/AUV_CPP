@@ -81,12 +81,22 @@ NBVPlannerNode::NBVPlannerNode()
     auto qos = rclcpp::QoS(rclcpp::KeepLast(10));
     qos.reliability(rclcpp::ReliabilityPolicy::BestEffort);
     
-    // Create subscribers
-    point_cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-        "cloud_in",
-        qos,
-        std::bind(&NBVPlannerNode::pointCloudCallback, this, std::placeholders::_1)
+    // Setup the subscriber
+    point_cloud_sub_.subscribe(this, "cloud_in", qos.get_rmw_qos_profile());
+
+    // Setup the filter to wait for the transform between the cloud's frame and map_frame
+    tf_filter_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
+        point_cloud_sub_,
+        *tf2_buffer_,
+        map_frame_,      // The frame we need the transform TO
+        10,              // Queue size
+        this->get_node_logging_interface(),
+        this->get_node_clock_interface(),
+        std::chrono::milliseconds(100) // How long to wait for the TF to arrive
     );
+
+    // Register the callback
+    tf_filter_->registerCallback(&NBVPlannerNode::pointCloudCallback, this);
     
     // Create publishers
     goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
@@ -379,7 +389,7 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
         t_exploration_sensor = tf2_buffer_->lookupTransform(
             map_frame_,
             msg->header.frame_id, // Point cloud should be published in the exploration sensor frame
-            tf2::TimePointZero);
+            msg->header.stamp);
         // Convert to Eigen transform
         Eigen::Isometry3d T_G_exploration_sensor = tf2::transformToEigen(t_exploration_sensor);
 
@@ -397,7 +407,7 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
             t_inspection_sensor = tf2_buffer_->lookupTransform(
                 map_frame_,
                 inspection_sensor_frame,
-                tf2::TimePointZero);
+                msg->header.stamp);
             // Convert to Eigen transform
             Eigen::Isometry3d T_G_inspection_sensor = tf2::transformToEigen(t_inspection_sensor);
 

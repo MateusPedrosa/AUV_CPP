@@ -35,20 +35,18 @@ private:
     rclcpp::Subscription<blueye_interfaces::msg::FloatStamped>::SharedPtr pitch_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
     double current_pitch_;
-    builtin_interfaces::msg::Time ts_;
 
 
     void pitchCallback(const blueye_interfaces::msg::FloatStamped::SharedPtr msg)
     {
         current_pitch_ = msg->data * M_PI / 180.0;
-        ts_ = msg->header.stamp;
     }
 
     void publishTransform()
     {
         geometry_msgs::msg::TransformStamped t;
 
-        t.header.stamp = ts_;
+        t.header.stamp = this->get_clock()->now();
         t.header.frame_id = this->get_parameter("robot_frame").as_string();
         t.child_frame_id = this->get_parameter("sonar_frame").as_string();
 
