@@ -29,6 +29,7 @@ find_package(Eigen3 REQUIRED)
 find_package(ompl REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(action_msgs REQUIRED)
+find_package(ufomap REQUIRED)
 
 # Generate action interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -40,20 +41,19 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 # Required for PCL + Eigen to work without crashing
 add_definitions(${PCL_DEFINITIONS})
 
-# --- Library: octomap_manager ---
-add_library(octomap_manager src/octomap_manager.cpp)
-target_include_directories(octomap_manager PUBLIC
+# --- Library: ufomap_manager ---
+add_library(ufomap_manager src/ufomap_manager.cpp)
+target_include_directories(ufomap_manager PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
   ${PCL_INCLUDE_DIRS}
-  ${OCTOMAP_INCLUDE_DIRS}
 )
-target_link_libraries(octomap_manager
+target_link_libraries(ufomap_manager
   ${PCL_LIBRARIES}
-  ${OCTOMAP_LIBRARIES}
+  UFO::Map
   Eigen3::Eigen
 )
-ament_target_dependencies(octomap_manager
+ament_target_dependencies(ufomap_manager
   rclcpp
   sensor_msgs
   pcl_conversions
@@ -61,49 +61,48 @@ ament_target_dependencies(octomap_manager
 )
 
 # --- Library: simple_planner ---
-add_library(simple_planner src/simple_planner.cpp)
-target_include_directories(simple_planner PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${OMPL_INCLUDE_DIRS}
-  ${OCTOMAP_INCLUDE_DIRS}
-  ${PCL_INCLUDE_DIRS}
-)
+#add_library(simple_planner src/simple_planner.cpp)
+#target_include_directories(simple_planner PUBLIC
+#  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+#  $<INSTALL_INTERFACE:include>
+#  ${OMPL_INCLUDE_DIRS}
+#  ${OCTOMAP_INCLUDE_DIRS}
+#  ${PCL_INCLUDE_DIRS}
+#)
 # Link OMPL and Eigen
-target_link_libraries(simple_planner
-  octomap_manager
-  ${OMPL_LIBRARIES}
-  Eigen3::Eigen
-)
-rosidl_get_typesupport_target(cpp_typesupport_target
-  ${PROJECT_NAME} rosidl_typesupport_cpp)
-target_link_libraries(simple_planner "${cpp_typesupport_target}")
-add_dependencies(simple_planner ${PROJECT_NAME})
-ament_target_dependencies(simple_planner
-  rclcpp
-  rclcpp_action
-  geometry_msgs
-  nav_msgs
-  sensor_msgs
-)
+#target_link_libraries(simple_planner
+#  octomap_manager
+#  ${OMPL_LIBRARIES}
+#  Eigen3::Eigen
+#)
+#rosidl_get_typesupport_target(cpp_typesupport_target
+#  ${PROJECT_NAME} rosidl_typesupport_cpp)
+#target_link_libraries(simple_planner "${cpp_typesupport_target}")
+#add_dependencies(simple_planner ${PROJECT_NAME})
+#ament_target_dependencies(simple_planner
+#  rclcpp
+#  rclcpp_action
+#  geometry_msgs
+#  nav_msgs
+#  sensor_msgs
+#)
 
 # --- Library: nbv_planner_lib ---
-add_library(nbv_planner_lib src/nbv_planner.cpp)
-target_include_directories(nbv_planner_lib PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-  ${OCTOMAP_INCLUDE_DIRS}
-)
-target_link_libraries(nbv_planner_lib
-  ${OCTOMAP_LIBRARIES}
-  Eigen3::Eigen
-)
-ament_target_dependencies(nbv_planner_lib
-  rclcpp
-  geometry_msgs
-  tf2
-  tf2_geometry_msgs
-)
+#add_library(nbv_planner_lib src/nbv_planner.cpp)
+#arget_include_directories(nbv_planner_lib PUBLIC
+#  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+#  $<INSTALL_INTERFACE:include>
+#)
+#target_link_libraries(nbv_planner_lib
+#  UFO::Map
+#  Eigen3::Eigen
+#)
+#ament_target_dependencies(nbv_planner_lib
+#  rclcpp
+#  geometry_msgs
+#  tf2
+#  tf2_geometry_msgs
+#)
 
 # --- Executable: nbv_planner_node ---
 add_executable(nbv_planner_node src/nbv_planner_node.cpp)
@@ -112,9 +111,9 @@ target_include_directories(nbv_planner_node PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(nbv_planner_node
-  octomap_manager
-  simple_planner
-  nbv_planner_lib
+  ufomap_manager
+#  simple_planner
+#  nbv_planner_lib
 )
 add_dependencies(nbv_planner_node ${PROJECT_NAME})
 ament_target_dependencies(nbv_planner_node
@@ -133,31 +132,31 @@ ament_target_dependencies(nbv_planner_node
 )
 
 # --- Executable: plan_path_client ---
-add_executable(plan_path_client src/plan_path_client.cpp)
-target_include_directories(plan_path_client PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
+#add_executable(plan_path_client src/plan_path_client.cpp)
+#target_include_directories(plan_path_client PUBLIC
+#  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+#  $<INSTALL_INTERFACE:include>
+#)
 
 # Link action interface to client
-target_link_libraries(plan_path_client "${cpp_typesupport_target}")
-add_dependencies(plan_path_client ${PROJECT_NAME})
+#target_link_libraries(plan_path_client "${cpp_typesupport_target}")
+#add_dependencies(plan_path_client ${PROJECT_NAME})
 
-ament_target_dependencies(plan_path_client
-  rclcpp
-  rclcpp_action
-  geometry_msgs
-  tf2
-  tf2_geometry_msgs
-)
+#ament_target_dependencies(plan_path_client
+#  rclcpp
+#  rclcpp_action
+#  geometry_msgs
+#  tf2
+#  tf2_geometry_msgs
+#)
 
 # --- Install Rules ---
 
 # Install Libraries (to global lib/)
 install(TARGETS
-  octomap_manager
-  simple_planner
-  nbv_planner_lib
+  ufomap_manager
+#  simple_planner
+#  nbv_planner_lib
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -166,7 +165,7 @@ install(TARGETS
 # Install Executables (to lib/project_name/)
 install(TARGETS
   nbv_planner_node
-  plan_path_client
+  #plan_path_client
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -182,13 +181,13 @@ install(DIRECTORY launch rviz config
 
 # --- Export for downstream packages ---
 ament_export_include_directories(include)
-ament_export_libraries(octomap_manager simple_planner nbv_planner_lib)
+ament_export_libraries(ufo_manager)#nbv_planner_lib)
 ament_export_dependencies(
   rclcpp
   rclcpp_action
   geometry_msgs
   nav_msgs
   ompl
-  octomap
+  ufomap
 )
 ament_package()

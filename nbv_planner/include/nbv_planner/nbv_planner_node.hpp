@@ -10,9 +10,9 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 
-#include "nbv_planner/octomap_manager.hpp"
-#include "nbv_planner/nbv_planner.hpp"
-#include "nbv_planner/simple_planner.hpp"
+#include "nbv_planner/ufomap_manager.hpp"
+// #include "nbv_planner/nbv_planner.hpp"
+// #include "nbv_planner/simple_planner.hpp"
 
 namespace nbv_planner {
 
@@ -25,20 +25,20 @@ public:
 private:
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     
-    void planningTimerCallback();
+    // void planningTimerCallback();
     
-    void publishOctomapMarkers();
+    void publishUFOMapMarkers();
     
-    void publishCandidateMarkers();
+    // void publishCandidateMarkers();
 
     void publishFrustumMarker();
 
     void publishInspectionFrustumMarker(const std::string& frame_id);
     
     // Core components
-    std::shared_ptr<OctomapManager> octomap_manager_;
-    std::unique_ptr<NBVPlanner> nbv_planner_;
-    std::unique_ptr<SimplePlanner> path_planner_;
+    std::unique_ptr<UFOMapManager> ufomap_manager_;
+    // std::unique_ptr<NBVPlanner> nbv_planner_;
+    // std::unique_ptr<SimplePlanner> path_planner_;
     
     // ROS interfaces
     message_filters::Subscriber<sensor_msgs::msg::PointCloud2> point_cloud_sub_;
