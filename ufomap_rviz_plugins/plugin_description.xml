@@ -1,0 +1,10 @@
+<library path="ufomap_rviz_plugins">
+  <class name="ufomap_rviz_plugins/UFOMap"
+         type="ufomap_ros::rviz_plugins::UFOMapDisplay"
+         base_class_type="rviz_common::Display">
+    <description>
+      Displays a UFOMap.
+    </description>
+    <message_type>ufomap_msgs/msg/UFOMapStamped</message_type>
+  </class>
+</library>
