@@ -17,6 +17,8 @@
   <depend>geometry_msgs</depend>
   <depend>visualization_msgs</depend>
   <depend>action_msgs</depend>
+  <depend>ufomap_msgs</depend>
+  <depend>ufomap_rviz_plugins</depend>
   
   <depend>tf2</depend>
   <depend>tf2_ros</depend>

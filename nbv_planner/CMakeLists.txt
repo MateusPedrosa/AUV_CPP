@@ -30,6 +30,8 @@ find_package(ompl REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(action_msgs REQUIRED)
 find_package(ufomap REQUIRED)
+find_package(ufomap_msgs REQUIRED)
+find_package(ufomap_rviz_plugins REQUIRED)
 
 # Generate action interfaces
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -115,6 +117,8 @@ target_link_libraries(nbv_planner_node
 #  simple_planner
 #  nbv_planner_lib
 )
+rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} rosidl_typesupport_cpp)
+target_link_libraries(nbv_planner_node "${cpp_typesupport_target}")
 add_dependencies(nbv_planner_node ${PROJECT_NAME})
 ament_target_dependencies(nbv_planner_node
   rclcpp
@@ -129,6 +133,7 @@ ament_target_dependencies(nbv_planner_node
   tf2_eigen
   message_filters
   pcl_conversions
+  ufomap_msgs
 )
 
 # --- Executable: plan_path_client ---

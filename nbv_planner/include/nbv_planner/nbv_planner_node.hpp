@@ -5,6 +5,8 @@
 #include <message_filters/subscriber.h>
 #include <tf2_ros/message_filter.h>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <ufomap_msgs/msg/ufo_map_stamped.hpp>
+#include <ufomap_msgs/conversions.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <tf2_ros/transform_listener.h>
@@ -26,6 +28,8 @@ private:
     void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
     
     // void planningTimerCallback();
+
+    void publishUFOMap();
     
     void publishUFOMapMarkers();
     
@@ -44,6 +48,7 @@ private:
     message_filters::Subscriber<sensor_msgs::msg::PointCloud2> point_cloud_sub_;
     std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>> tf_filter_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
+    rclcpp::Publisher<ufomap_msgs::msg::UFOMapStamped>::SharedPtr map_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr candidates_pub_;
     rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr frustum_pub_;

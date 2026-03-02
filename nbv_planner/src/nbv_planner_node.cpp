@@ -115,6 +115,7 @@ NBVPlannerNode::NBVPlannerNode()
     // Create publishers
     goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
         "nbv_goal", 10);
+    map_pub_ = this->create_publisher<ufomap_msgs::msg::UFOMapStamped>("ufomap", 10);
     markers_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
         "ufomap_markers", 10);
     candidates_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
@@ -431,7 +432,8 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
         received_first_cloud_ = true;
 
         // Publish visualization
-        publishUFOMapMarkers();
+        // publishUFOMapMarkers();
+        publishUFOMap();
         
     } catch (tf2::TransformException& ex) {
         RCLCPP_WARN(this->get_logger(), "TF exception: %s", ex.what());
@@ -473,6 +475,27 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
 //         RCLCPP_WARN(this->get_logger(), "Could not get robot pose: %s", ex.what());
 //     }
 // }
+
+void NBVPlannerNode::publishUFOMap()
+{
+    // If the UFOMap should be compressed using LZ4.
+    // Good if you are sending the UFOMap between computers.
+    bool compress = false;
+
+    // Lowest depth to publish.
+    // Higher value means less data to transfer, good in
+    // situation where the data rate is low.
+    // Many nodes do not require detailed maps as well.
+    ufo::map::DepthType pub_depth = 0;
+
+    auto msg = std::make_shared<ufomap_msgs::msg::UFOMapStamped>();
+    if (ufomap_msgs::ufoToMsg(ufomap_manager_->getMap(), msg->map, ufo::geometry::BoundingVolume(), compress, pub_depth)) {
+        // Conversion was successful
+        msg->header.stamp = this->now();
+        msg->header.frame_id = "map";
+        map_pub_->publish(*msg);
+    }
+}
 
 void NBVPlannerNode::publishUFOMapMarkers()
 {

@@ -22,6 +22,7 @@ set(QT_LIBRARIES Qt5::Widgets)
 
 add_library(${PROJECT_NAME} SHARED
   src/ufomap_display.cpp
+  include/ufomap_rviz_plugins/ufomap_display.h
 )
 
 target_include_directories(${PROJECT_NAME}
