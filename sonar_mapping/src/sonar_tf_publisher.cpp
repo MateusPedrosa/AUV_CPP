@@ -18,8 +18,12 @@ public:
         
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
+        rclcpp::QoS qos(1);
+        qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
+        qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+
         pitch_sub_ = this->create_subscription<blueye_interfaces::msg::FloatStamped>(
-            this->get_parameter("pitch_topic").as_string(), 10,
+            this->get_parameter("pitch_topic").as_string(), qos,
             std::bind(&SonarTfPublisher::pitchCallback, this, std::placeholders::_1)
         );
 
