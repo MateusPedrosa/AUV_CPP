@@ -25,6 +25,9 @@ UFOMapManager::UFOMapManager(UFOMapParameters params)
            params_.clamping_thres_min,
            params_.clamping_thres_max)
 {
+    // Enable min/max change detection. This allows us to get an 
+    // axis-aligned bounding box of the updated region.
+    map_.enableMinMaxChangeDetection(true);
     RCLCPP_INFO(rclcpp::get_logger("ufomap_manager"), "UFOMapManager created with depth levels: %d", params_.depth_levels);
 }
 
@@ -54,6 +57,17 @@ void UFOMapManager::insertPointCloudIntoMap(
 
     // Integrate point cloud into UFOMap
     map_.insertPointCloudDiscrete(sensor_pose.translation(), cloud, max_range, params_.integration_depth);
+}
+
+// Get axis-aligned bounding box of update part of the map
+ufo::geometry::AABB UFOMapManager::getChangeBoundingBox() const {
+    return ufo::geometry::AABB(map_.minChange(), map_.maxChange());
+}
+
+// Reset min/max change detection so we get correct axis-aligned bounding box
+// next time we publish.
+void UFOMapManager::resetChangeDetection() {
+    map_.resetMinMaxChangeDetection();
 }
 
 // void UFOMapManager::castRay(

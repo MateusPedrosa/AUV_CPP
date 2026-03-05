@@ -64,7 +64,7 @@ private:
     std::string map_frame_;
     std::string robot_frame_;
     std::string cloud_topic_;
-    double planning_frequency_;
+    // double planning_frequency_;
     std::vector<std::string> inspection_sensor_frames_;
     std::string exploration_sensor_frame_;
     CameraIntrinsics camera_intrinsics_;

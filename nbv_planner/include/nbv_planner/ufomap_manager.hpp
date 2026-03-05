@@ -106,6 +106,10 @@ public:
 
     void insertPointCloudIntoMap(ufo::map::PointCloud& cloud, const ufo::math::Pose6& T_G_sensor);
 
+    ufo::geometry::AABB getChangeBoundingBox() const;
+
+    void resetChangeDetection();
+
     // /**
     //  * @brief Reset the map
     //  */

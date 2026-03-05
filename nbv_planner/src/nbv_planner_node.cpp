@@ -13,7 +13,7 @@ NBVPlannerNode::NBVPlannerNode()
     this->declare_parameter("map_frame", "map");
     this->declare_parameter("robot_frame", "base_link");
     this->declare_parameter("octree_resolution", 0.1);
-    this->declare_parameter("planning_frequency", 0.5);
+    // this->declare_parameter("planning_frequency", 2.0);
     this->declare_parameter("exploration_sensor_max_range", 40.0);
     this->declare_parameter("exploration_sensor_min_range", 0.1);
     this->declare_parameter("exploration_sensor_hfov", 130.0 * M_PI / 180.0);
@@ -40,7 +40,7 @@ NBVPlannerNode::NBVPlannerNode()
     // Get parameters
     map_frame_ = this->get_parameter("map_frame").as_string();
     robot_frame_ = this->get_parameter("robot_frame").as_string();
-    planning_frequency_ = this->get_parameter("planning_frequency").as_double();
+    // planning_frequency_ = this->get_parameter("planning_frequency").as_double();
 
     inspection_sensor_frames_ = this->get_parameter("inspection_sensor_frames").as_string_array();
     exploration_sensor_frame_ = this->get_parameter("exploration_sensor_frame").as_string();
@@ -126,7 +126,8 @@ NBVPlannerNode::NBVPlannerNode()
     // auto period = std::chrono::duration<double>(1.0 / planning_frequency_);
     // planning_timer_ = this->create_wall_timer(
     //     std::chrono::duration_cast<std::chrono::milliseconds>(period),
-    //     std::bind(&NBVPlannerNode::planningTimerCallback, this));
+    //     std::bind(&NBVPlannerNode::planningTimerCallback, this)
+    // );
     
     RCLCPP_INFO(this->get_logger(), "NBV Planner Node initialized");
     RCLCPP_INFO(this->get_logger(), "  Resolution: %.3f m", ufomap_params.resolution);
@@ -444,7 +445,7 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
 //     if (!received_first_cloud_) {
 //         return;
 //     }
-    
+
 //     try {
 //         // Get current robot pose
 //         geometry_msgs::msg::TransformStamped transform;
@@ -473,6 +474,8 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
 //     } catch (tf2::TransformException& ex) {
 //         RCLCPP_WARN(this->get_logger(), "Could not get robot pose: %s", ex.what());
 //     }
+
+//     publishUFOMap();
 // }
 
 void NBVPlannerNode::publishUFOMap()
@@ -487,12 +490,21 @@ void NBVPlannerNode::publishUFOMap()
     // Many nodes do not require detailed maps as well.
     ufo::map::DepthType pub_depth = 0;
 
+    // Get the bounding box of only the updated region
+    ufo::geometry::AABB updated_aabb = ufomap_manager_->getChangeBoundingBox();
+    ufo::geometry::BoundingVolume bv;
+    bv.add(updated_aabb);
+
     auto msg = std::make_shared<ufomap_msgs::msg::UFOMapStamped>();
-    if (ufomap_msgs::ufoToMsg(ufomap_manager_->getMap(), msg->map, ufo::geometry::BoundingVolume(), compress, pub_depth)) {
-        // Conversion was successful
+    if (ufomap_msgs::ufoToMsg(ufomap_manager_->getMap(), msg->map, bv, compress, pub_depth)) {
         msg->header.stamp = this->now();
-        msg->header.frame_id = "map";
+        msg->header.frame_id = map_frame_;
         map_pub_->publish(*msg);
+
+        // Reset the change detection so the next loop only catches new updates
+        ufomap_manager_->resetChangeDetection();
+    } else {
+        RCLCPP_INFO(this->get_logger(), "!!!!!!!!!!!!!!!!!!!!!!!!!!!");
     }
 }
 
