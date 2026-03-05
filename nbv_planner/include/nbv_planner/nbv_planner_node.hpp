@@ -7,6 +7,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <ufomap_msgs/msg/ufo_map_stamped.hpp>
 #include <ufomap_msgs/conversions.h>
+#include <ufomap_ros/conversions.h>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <tf2_ros/transform_listener.h>

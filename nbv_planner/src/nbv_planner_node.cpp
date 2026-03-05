@@ -1,7 +1,6 @@
 #include "nbv_planner/nbv_planner_node.hpp"
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
-#include <pcl_conversions/pcl_conversions.h>
 #include "tf2_ros/create_timer_ros.h"
 
 namespace nbv_planner {
@@ -405,14 +404,14 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
             map_frame_,
             msg->header.frame_id, // Point cloud should be published in the exploration sensor frame
             msg->header.stamp);
-        // Convert to Eigen transform
-        Eigen::Isometry3d T_G_exploration_sensor = tf2::transformToEigen(t_exploration_sensor);
 
-        // Convert ROS PointCloud2 to PCL
-        pcl::PointCloud<pcl::PointXYZ> cloud;
-        pcl::fromROSMsg(*msg, cloud);
+        ufo::math::Pose6 sensor_transform;
+        sensor_transform = ufomap_ros::rosToUfo(t_exploration_sensor.transform);
+
+        ufo::map::PointCloud cloud;
+        ufomap_ros::rosToUfo(*msg, cloud);
         
-        ufomap_manager_->insertPointCloudIntoMap(cloud, T_G_exploration_sensor);
+        ufomap_manager_->insertPointCloudIntoMap(cloud, sensor_transform);
 
         // for (const auto& inspection_sensor_frame : inspection_sensor_frames_) {
         //     // Get transform from inspection sensor to map frame

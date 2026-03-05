@@ -22,8 +22,8 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2_eigen REQUIRED)
 find_package(message_filters REQUIRED)
-find_package(PCL REQUIRED)
-find_package(pcl_conversions REQUIRED)
+# find_package(PCL REQUIRED)
+# find_package(pcl_conversions REQUIRED)
 find_package(octomap REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(ompl REQUIRED)
@@ -31,6 +31,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(action_msgs REQUIRED)
 find_package(ufomap REQUIRED)
 find_package(ufomap_msgs REQUIRED)
+find_package(ufomap_ros REQUIRED)
 find_package(ufomap_rviz_plugins REQUIRED)
 
 # Generate action interfaces
@@ -41,24 +42,24 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 # --- Global Definitions ---
 # Required for PCL + Eigen to work without crashing
-add_definitions(${PCL_DEFINITIONS})
+# add_definitions(${PCL_DEFINITIONS})
 
 # --- Library: ufomap_manager ---
 add_library(ufomap_manager src/ufomap_manager.cpp)
 target_include_directories(ufomap_manager PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
-  ${PCL_INCLUDE_DIRS}
+  # ${PCL_INCLUDE_DIRS}
 )
 target_link_libraries(ufomap_manager
-  ${PCL_LIBRARIES}
+  # ${PCL_LIBRARIES}
   UFO::Map
   Eigen3::Eigen
 )
 ament_target_dependencies(ufomap_manager
   rclcpp
   sensor_msgs
-  pcl_conversions
+  # pcl_conversions
   tf2_eigen
 )
 
@@ -132,8 +133,9 @@ ament_target_dependencies(nbv_planner_node
   tf2_geometry_msgs
   tf2_eigen
   message_filters
-  pcl_conversions
+  # pcl_conversions
   ufomap_msgs
+  ufomap_ros
 )
 
 # --- Executable: plan_path_client ---

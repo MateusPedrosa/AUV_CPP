@@ -1,21 +1,17 @@
 #include "nbv_planner/ufomap_manager.hpp"
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
-#include <pcl/filters/filter.h>
-#include <pcl/common/transforms.h>
 
 namespace nbv_planner {
 
-ufo::math::Pose6 poseEigenToUFOMap(const Eigen::Isometry3d& transform)
-{
-    const Eigen::Vector3d& t = transform.translation();
-    Eigen::Quaterniond q(transform.rotation());
+// ufo::math::Pose6 poseEigenToUFOMap(const Eigen::Isometry3d& transform)
+// {
+//     const Eigen::Vector3d& t = transform.translation();
+//     Eigen::Quaterniond q(transform.rotation());
 
-    return ufo::math::Pose6(
-        t.x(), t.y(), t.z(),
-        q.w(), q.x(), q.y(), q.z()
-    );
-}
+//     return ufo::math::Pose6(
+//         t.x(), t.y(), t.z(),
+//         q.w(), q.x(), q.y(), q.z()
+//     );
+// }
 
 UFOMapManager::UFOMapManager(UFOMapParameters params)
     : params_(std::move(params)),
@@ -33,33 +29,31 @@ UFOMapManager::UFOMapManager(UFOMapParameters params)
 }
 
 void UFOMapManager::insertPointCloudIntoMap(
-    const pcl::PointCloud<pcl::PointXYZ>& cloud,
-    const Eigen::Isometry3d& T_G_sensor)
+    ufo::map::PointCloud& cloud,
+    const ufo::math::Pose6& sensor_pose)
 {
     // Maximum range to integrate, in meters.
     // Set to negative value to ignore maximum range.
     double max_range = params_.sensor_max_range;
 
     // Remove NaN values, if any.
-    std::vector<int> indices;
-    pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
-    pcl::removeNaNFromPointCloud(cloud, filtered_cloud, indices);
+    // std::vector<int> indices;
+    // ufo::map::PointCloud filtered_cloud;
+    // pcl::removeNaNFromPointCloud(cloud, filtered_cloud, indices);
 
-    ufo::map::PointCloud ufo_cloud;
-    ufo_cloud.reserve(filtered_cloud.size());
-    for (const auto& pcl_point : filtered_cloud) {
-        ufo_cloud.push_back(ufo::map::Point3(pcl_point.x, pcl_point.y, pcl_point.z));
-    }
-
-    ufo::math::Pose6 sensor_frame = poseEigenToUFOMap(T_G_sensor);
+    // ufo::map::PointCloud ufo_cloud;
+    // ufo_cloud.reserve(filtered_cloud.size());
+    // for (const auto& pcl_point : filtered_cloud) {
+    //     ufo_cloud.push_back(ufo::map::Point3(pcl_point.x, pcl_point.y, pcl_point.z));
+    // }
 
     // Specify if the point cloud should be transformed in parallel or not.
     bool parallel = true;
     // Transform point cloud to correct frame
-    ufo_cloud.transform(sensor_frame, parallel);
+    cloud.transform(sensor_pose, parallel);
 
     // Integrate point cloud into UFOMap
-    map_.insertPointCloudDiscrete(sensor_frame.translation(), ufo_cloud, max_range, params_.integration_depth);
+    map_.insertPointCloudDiscrete(sensor_pose.translation(), cloud, max_range, params_.integration_depth);
 }
 
 // void UFOMapManager::castRay(

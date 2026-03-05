@@ -3,12 +3,11 @@
 
 #include <memory>
 #include <ufo/map/occupancy_map.h>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <geometry_msgs/msg/pose.hpp>
+#include "geometry_msgs/msg/transform.hpp"
 #include <rclcpp/rclcpp.hpp>
-
-#include <pcl/point_cloud.h>
-#include <pcl/point_types.h>
 
 namespace nbv_planner {
 
@@ -105,7 +104,7 @@ public:
      */
     const UFOMapParameters& getParams() const { return params_; }
 
-    void insertPointCloudIntoMap(const pcl::PointCloud<pcl::PointXYZ>& cloud, const Eigen::Isometry3d& T_G_sensor);
+    void insertPointCloudIntoMap(ufo::map::PointCloud& cloud, const ufo::math::Pose6& T_G_sensor);
 
     // /**
     //  * @brief Reset the map
