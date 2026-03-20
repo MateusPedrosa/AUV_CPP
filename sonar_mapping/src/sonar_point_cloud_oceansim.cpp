@@ -39,6 +39,7 @@ public:
         this->declare_parameter("filter_distance_threshold", 2.0); // Max average distance threshold in meters
         this->declare_parameter("radius_search", 0.5); // 50cm radius
         this->declare_parameter("min_neighbors", 5);   // At least 5 neighbors
+        this->declare_parameter("vertical_arc_points", 20); // Number of points to distribute along vertical arc (n)
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
@@ -53,6 +54,7 @@ public:
         filter_distance_threshold_ = this->get_parameter("filter_distance_threshold").as_double();
         radius_search_ = this->get_parameter("radius_search").as_double();
         min_neighbors_ = this->get_parameter("min_neighbors").as_int();
+        vertical_arc_points_ = this->get_parameter("vertical_arc_points").as_int();
 
         // Ensure window size is even
         if (filter_window_size_ % 2 != 0) {
@@ -90,6 +92,7 @@ private:
     double filter_distance_threshold_;
     double radius_search_;
     int min_neighbors_;
+    int vertical_arc_points_;
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr applyRadiusFilter(const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud) {
         if (input_cloud->empty()) return input_cloud;
@@ -108,67 +111,96 @@ private:
 
     /**
      * @brief Filters sonar features for noise and outliers using averaged point distances.
-     * * This method implements a moving window filter across consecutive sonar beams. 
-     * It assumes that feature points belonging to physical objects should be spatially 
-     * close across adjacent beams.
-     * * The average distance value for a focus point $f_i^S$ is calculated using a window 
-     * of size $s$ (totaling $s + 1$ consecutive beams):
-     * * $$\bar{d}_i^f = \frac{1}{s+1} \sum_{j=i-\frac{s}{2}}^{i+\frac{s}{2}} \sqrt{(f_{i_x}^S - f_{j_x}^S)^2 + (f_{i_y}^S - f_{j_y}^S)^2}$$
      *
-     * @param points_by_beam A vector of vectors containing points organized by their respective laser beam index.
+     * This method implements a moving window filter across consecutive sonar beams.
+     * It assumes that feature points belonging to physical objects should be spatially
+     * close across adjacent beams.
+     *
+     * The average distance value for a focus point $f_i^S$ is approximated using the
+     * centroid of each neighbouring beam's point set, rather than all individual points.
+     * For each beam j in the window, the centroid $\bar{p}_j$ is:
+     *
+     *   $\bar{p}_j = \frac{1}{|B_j|} \sum_{p \in B_j} p$
+     *
+     * The filtered distance metric is then:
+     *
+     *   $\bar{d}_i^f = \frac{1}{s+1} \sum_{j=i-s/2}^{i+s/2} \| f_i^S - \bar{p}_j \|$
+     *
+     * This reduces the inner loop from O(points_per_beam × window_size) to O(window_size)
+     * per focus point, while preserving the spatial coherence check from the original.
+     * Beams with no returns are skipped (they contribute no centroid to the average).
+     *
+     * @param points_by_beam A vector of vectors containing points organized by beam index.
      * @return pcl::PointCloud<pcl::PointXYZ> Filtered point cloud
-     * * @note Source: "ROV-Based Autonomous Maneuvering for Ship Hull Inspection with Coverage Monitoring" (Cardaillac, A. et al.) - Equations 54 and 55
+     *
+     * @note Adapted from: "ROV-Based Autonomous Maneuvering for Ship Hull Inspection with
+     *       Coverage Monitoring" (Cardaillac, A. et al.) - Equations 54 and 55
      */
     pcl::PointCloud<pcl::PointXYZ> filterPointCloud(
         const std::vector<std::vector<pcl::PointXYZ>>& points_by_beam) {
         pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
 
         int num_beams = points_by_beam.size();
-        
+
         if (num_beams == 0) {
             return filtered_cloud;
         }
 
+        // Pre-compute one centroid per beam. Beams with no returns get a sentinel
+        // flag (has_centroid = false) and are excluded from the distance average.
+        struct BeamCentroid {
+            double x{0.0}, y{0.0}, z{0.0};
+            bool has_centroid{false};
+        };
+
+        std::vector<BeamCentroid> centroids(num_beams);
+        for (int i = 0; i < num_beams; i++) {
+            const auto& pts = points_by_beam[i];
+            if (pts.empty()) continue;
+
+            double sx = 0.0, sy = 0.0, sz = 0.0;
+            for (const auto& p : pts) {
+                sx += p.x;
+                sy += p.y;
+                sz += p.z;
+            }
+            double inv_n = 1.0 / static_cast<double>(pts.size());
+            centroids[i] = {sx * inv_n, sy * inv_n, sz * inv_n, true};
+        }
+
         int half_window = filter_window_size_ / 2;
 
-        // Process each beam
+        // For each focus point, compute the average distance to the centroids of
+        // the surrounding beams (window of size filter_window_size_ + 1).
         for (int i = 0; i < num_beams; i++) {
             const auto& beam_points = points_by_beam[i];
-            
-            // Process each point in the beam
+            if (beam_points.empty()) continue;
+
+            int start_beam = std::max(0, i - half_window);
+            int end_beam   = std::min(num_beams - 1, i + half_window);
+
             for (const auto& focus_point : beam_points) {
-                // Calculate window boundaries
-                int start_beam = std::max(0, i - half_window);
-                int end_beam = std::min(num_beams - 1, i + half_window);
-                
-                // Compute average distance to surrounding points
                 double sum_distances = 0.0;
                 int count = 0;
-                
+
                 for (int j = start_beam; j <= end_beam; j++) {
-                    for (const auto& neighbor_point : points_by_beam[j]) {
-                        // Calculate Euclidean distance
-                        double dx = focus_point.x - neighbor_point.x;
-                        double dy = focus_point.y - neighbor_point.y;
-                        double dz = focus_point.z - neighbor_point.z;
-                        double distance = std::sqrt(dx*dx + dy*dy + dz*dz);
-                        
-                        sum_distances += distance;
-                        count++;
-                    }
+                    if (!centroids[j].has_centroid) continue;
+
+                    double dx = focus_point.x - centroids[j].x;
+                    double dy = focus_point.y - centroids[j].y;
+                    double dz = focus_point.z - centroids[j].z;
+                    sum_distances += std::sqrt(dx*dx + dy*dy + dz*dz);
+                    count++;
                 }
-                
-                // Calculate average distance d_i^f = (1/(s+1)) * sum of distances
+
+                // Keep point if average distance to neighbour centroids is below threshold
                 double avg_distance = (count > 0) ? sum_distances / count : 0.0;
-                
-                // Keep point if average distance is below threshold
-                // For present objects, feature points should be close to each other
                 if (avg_distance <= filter_distance_threshold_) {
                     filtered_cloud.push_back(focus_point);
                 }
             }
         }
-        
+
         return filtered_cloud;
     }
 
@@ -222,17 +254,60 @@ private:
                 // Assuming center column is 0 degrees, spreading across h_fov
                 double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
 
-                // Frame: X=Forward, Y=Left, Z=Up
-                double x = range * cos(bearing);
-                double y = range * sin(bearing);
-                double z = 0.0; // Assuming flat plane at sonar depth
+                // The sonar gives range and bearing but the elevation (pitch) is ambiguous —
+                // the return could originate from anywhere along a vertical arc of [-v_fov_/2, +v_fov/2].
+                // We model this uncertainty by distributing n points evenly along that arc.
+                //
+                // For a given elevation angle phi, the 3D position is:
+                //   x = range * cos(phi) * cos(bearing)
+                //   y = range * cos(phi) * sin(bearing)
+                //   z = range * sin(phi)
+                //
+                // At phi = 0 (horizontal) this reduces to the original x/y projection.
+                int n = vertical_arc_points_;
+                for (int k = 0; k < n; k++) {
+                    // Elevation angle: uniformly sampled across [-v_fov_/2, +v_fov_/2]
+                    double elevation = (n > 1)
+                        ? (-v_fov_ / 2.0 + k * v_fov_ / (n - 1))
+                        : 0.0;
 
-                pcl::PointXYZ point;
-                point.x = x;
-                point.y = y;
-                point.z = z;
+                    double cos_elev = cos(elevation);
+                    double x = range * cos_elev * cos(bearing);
+                    double y = range * cos_elev * sin(bearing);
+                    double z = range * sin(elevation);
 
-                points_by_beam[c].push_back(point);
+                    pcl::PointXYZ point;
+                    point.x = x;
+                    point.y = y;
+                    point.z = z;
+
+                    points_by_beam[c].push_back(point);
+                }
+            }
+        }
+
+        // For beams with no returns, insert a sentinel point just beyond max_range.
+        // OctoMap treats the voxels along a ray up to (but not including) the endpoint
+        // as free space, so a point at max_range + 1 marks the entire beam as free.
+        // Elevation is fixed at phi = 0 (beam centre); only the horizontal bearing matters.
+        pcl::PointCloud<pcl::PointXYZ> free_space_cloud;
+        double sentinel_range = max_range_ + 1.0;
+        for (int c = 0; c < cols; c++) {
+            if (!points_by_beam[c].empty()) continue;
+
+            double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
+            int n = vertical_arc_points_;
+            for (int k = 0; k < n; k++) {
+                double elevation = (n > 1)
+                    ? (-v_fov_ / 2.0 + k * v_fov_ / (n - 1))
+                    : 0.0;
+
+                double cos_elev = cos(elevation);
+                pcl::PointXYZ sentinel;
+                sentinel.x = sentinel_range * cos_elev * cos(bearing);
+                sentinel.y = sentinel_range * cos_elev * sin(bearing);
+                sentinel.z = sentinel_range * sin(elevation);
+                free_space_cloud.push_back(sentinel);
             }
         }
 
@@ -259,6 +334,15 @@ private:
         RCLCPP_DEBUG(this->get_logger(), 
                     "Filtering: %zu points before -> %zu points after (removed %zu points, %.1f%%)",
                     total_points_before, points_after, points_removed, filter_percentage);
+
+        // Merge free-space sentinels with the filtered occupancy cloud.
+        // Sentinels are intentionally not passed through the outlier filter —
+        // they are synthetic rays, not real returns, and should always be kept.
+        *final_cloud += free_space_cloud;
+
+        RCLCPP_DEBUG(this->get_logger(),
+                    "Free-space sentinels: %zu empty beams marked at range %.1fm",
+                    free_space_cloud.size(), sentinel_range);
 
         // Publish filtered point cloud
         if (!final_cloud->empty()) {

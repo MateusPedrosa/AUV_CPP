@@ -3,10 +3,10 @@ nbv_planner_node:
   ros__parameters:
     map_frame: "map"
     robot_frame: "base_link"
-    octree_resolution: 0.1
+    octree_resolution: 0.2
     planning_frequency: 0.5
     exploration_sensor_max_range: 40.0
-    exploration_sensor_min_range: 0.2
+    exploration_sensor_min_range: 0.1
     max_free_space: 0.0
     min_height_free_space: 0.0
     exploration_sensor_hfov: 2.2689  # 130 deg in rad
@@ -23,11 +23,11 @@ nbv_planner_node:
     cloud_topic: "/sonar_point_cloud"
 
 # Sonar Point Cloud Node Parameters
-sonar_point_cloud_node:
+sonar_point_cloud_oceansim:
   ros__parameters:
     sonar_topic: "/oceansim/robot/imaging_sonar"
     pose_topic: "/oceansim/robot/pose"
-    resolution: 0.1
+    resolution: 0.2
     max_range: 40.0
     min_range: 0.1
     horizontal_fov: 130.0
