@@ -4,7 +4,7 @@
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/transforms.h>
-#include <pcl/filters/radius_outlier_removal.h>
+// #include <pcl/filters/radius_outlier_removal.h>
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/image.hpp>
@@ -20,6 +20,8 @@ using namespace std::chrono_literals;
 using std::placeholders::_1;
 
 // TODO: use OculusPing message type
+
+// TODO: When vertical_arc_points > 1, add missing points after filtering
 
 class SonarPointCloud : public rclcpp::Node
 {
@@ -39,7 +41,7 @@ public:
         this->declare_parameter("filter_distance_threshold", 2.0); // Max average distance threshold in meters
         this->declare_parameter("radius_search", 0.5); // 50cm radius
         this->declare_parameter("min_neighbors", 5);   // At least 5 neighbors
-        this->declare_parameter("vertical_arc_points", 20); // Number of points to distribute along vertical arc (n)
+        this->declare_parameter("vertical_arc_points", 1); // Number of points to distribute along vertical arc (n)
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
@@ -94,20 +96,20 @@ private:
     int min_neighbors_;
     int vertical_arc_points_;
 
-    pcl::PointCloud<pcl::PointXYZ>::Ptr applyRadiusFilter(const pcl::PointCloud<pcl::PointXYZ>::Ptr& input_cloud) {
-        if (input_cloud->empty()) return input_cloud;
+    // pcl::PointCloud<pcl::PointXYZI>::Ptr applyRadiusFilter(const pcl::PointCloud<pcl::PointXYZI>::Ptr& input_cloud) {
+    //     if (input_cloud->empty()) return input_cloud;
 
-        pcl::PointCloud<pcl::PointXYZ>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-        pcl::RadiusOutlierRemoval<pcl::PointXYZ> outrem;
+    //     pcl::PointCloud<pcl::PointXYZI>::Ptr filtered_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    //     pcl::RadiusOutlierRemoval<pcl::PointXYZI> outrem;
         
-        outrem.setInputCloud(input_cloud);
-        outrem.setRadiusSearch(radius_search_);
-        outrem.setMinNeighborsInRadius(min_neighbors_);
+    //     outrem.setInputCloud(input_cloud);
+    //     outrem.setRadiusSearch(radius_search_);
+    //     outrem.setMinNeighborsInRadius(min_neighbors_);
         
-        // Apply filter
-        outrem.filter(*filtered_cloud);
-        return filtered_cloud;
-    }
+    //     // Apply filter
+    //     outrem.filter(*filtered_cloud);
+    //     return filtered_cloud;
+    // }
 
     /**
      * @brief Filters sonar features for noise and outliers using averaged point distances.
@@ -131,14 +133,14 @@ private:
      * Beams with no returns are skipped (they contribute no centroid to the average).
      *
      * @param points_by_beam A vector of vectors containing points organized by beam index.
-     * @return pcl::PointCloud<pcl::PointXYZ> Filtered point cloud
+     * @return pcl::PointCloud<pcl::PointXYZI> Filtered point cloud
      *
      * @note Adapted from: "ROV-Based Autonomous Maneuvering for Ship Hull Inspection with
      *       Coverage Monitoring" (Cardaillac, A. et al.) - Equations 54 and 55
      */
-    pcl::PointCloud<pcl::PointXYZ> filterPointCloud(
-        const std::vector<std::vector<pcl::PointXYZ>>& points_by_beam) {
-        pcl::PointCloud<pcl::PointXYZ> filtered_cloud;
+    pcl::PointCloud<pcl::PointXYZI> filterPointCloud(
+        const std::vector<std::vector<pcl::PointXYZI>>& points_by_beam) {
+        pcl::PointCloud<pcl::PointXYZI> filtered_cloud;
 
         int num_beams = points_by_beam.size();
 
@@ -228,11 +230,11 @@ private:
                         "Sonar image: %dx%d, range: %.2f-%.2fm, derived range_res: %.6fm",
                         cols, rows, min_range_, max_range_, range_res);
 
-        std::vector<std::vector<pcl::PointXYZ>> points_by_beam(cols);
+        std::vector<std::vector<pcl::PointXYZI>> points_by_beam(cols);
 
         // M750d produces 2D range-bearing data at constant depth
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
+        for (int c = 0; c < cols; c++) {
+            for (int r = 0; r < rows; r++) {
                 float intensity = sonar_image.at<float>(r, c);
 
                 // Calculate range (distance from sonar)
@@ -272,14 +274,12 @@ private:
                         : 0.0;
 
                     double cos_elev = cos(elevation);
-                    double x = range * cos_elev * cos(bearing);
-                    double y = range * cos_elev * sin(bearing);
-                    double z = range * sin(elevation);
 
-                    pcl::PointXYZ point;
-                    point.x = x;
-                    point.y = y;
-                    point.z = z;
+                    pcl::PointXYZI point;
+                    point.x = range * cos_elev * cos(bearing);
+                    point.y = range * cos_elev * sin(bearing);
+                    point.z = range * sin(elevation);
+                    point.intensity = static_cast<float>(c); // store column index to recover first hit after filtering
 
                     points_by_beam[c].push_back(point);
                 }
@@ -290,7 +290,7 @@ private:
         // OctoMap treats the voxels along a ray up to (but not including) the endpoint
         // as free space, so a point at max_range + 1 marks the entire beam as free.
         // Elevation is fixed at phi = 0 (beam centre); only the horizontal bearing matters.
-        pcl::PointCloud<pcl::PointXYZ> free_space_cloud;
+        pcl::PointCloud<pcl::PointXYZI> free_space_cloud;
         double sentinel_range = max_range_ + 1.0;
         for (int c = 0; c < cols; c++) {
             if (!points_by_beam[c].empty()) continue;
@@ -303,10 +303,11 @@ private:
                     : 0.0;
 
                 double cos_elev = cos(elevation);
-                pcl::PointXYZ sentinel;
+                pcl::PointXYZI sentinel;
                 sentinel.x = sentinel_range * cos_elev * cos(bearing);
                 sentinel.y = sentinel_range * cos_elev * sin(bearing);
                 sentinel.z = sentinel_range * sin(elevation);
+                sentinel.intensity = 1.0f;
                 free_space_cloud.push_back(sentinel);
             }
         }
@@ -317,16 +318,46 @@ private:
             total_points_before += beam.size();
         }
 
-        pcl::PointCloud<pcl::PointXYZ> window_filtered_cloud = filterPointCloud(points_by_beam);
+        pcl::PointCloud<pcl::PointXYZI> filtered_cloud = filterPointCloud(points_by_beam);
 
-        pcl::PointCloud<pcl::PointXYZ>::Ptr window_filtered_cloud_ptr = window_filtered_cloud.makeShared();
-        pcl::PointCloud<pcl::PointXYZ>::Ptr final_cloud = applyRadiusFilter(window_filtered_cloud_ptr);
+        // pcl::PointCloud<pcl::PointXYZI>::Ptr final_cloud = applyRadiusFilter(window_filtered_cloud_ptr);
 
-        final_cloud->header.frame_id = "sonar_link";
+        filtered_cloud.header.frame_id = "sonar_link";
 
-        RCLCPP_DEBUG(this->get_logger(), "Filtered cloud from %zu beams to %zu points", points_by_beam.size(), final_cloud->size());
+        std::vector<float> min_range_sq_for_col(cols, std::numeric_limits<float>::max());
 
-        size_t points_after = final_cloud->size();
+        // Scan the filtered cloud to find the closest surviving point for each beam
+        for (size_t i = 0; i < filtered_cloud.size(); i++) {
+            const auto& p = filtered_cloud.points[i];
+            
+            // Retrieve column index from the intensity field
+            int c = static_cast<int>(p.intensity); 
+            
+            // Calculate squared distance to sensor origin
+            float dist_sq = p.x * p.x + p.y * p.y + p.z * p.z;
+            
+            // If this point is closer than the current record holder for this beam, update it
+            if (dist_sq < min_range_sq_for_col[c]) {
+                min_range_sq_for_col[c] = dist_sq;
+            }
+        }
+
+        float epsilon = 0.1f;
+        for (size_t i = 0; i < filtered_cloud.size(); i++) {
+            auto& p = filtered_cloud.points[i];
+            int c = static_cast<int>(p.intensity);
+            float dist_sq = p.x * p.x + p.y * p.y + p.z * p.z;
+
+            if (std::abs(dist_sq - min_range_sq_for_col[c]) < epsilon) {
+                p.intensity = 1.0f; 
+            } else {
+                p.intensity = 0.0f;
+            }
+        }
+
+        RCLCPP_DEBUG(this->get_logger(), "Filtered cloud from %zu beams to %zu points", points_by_beam.size(), filtered_cloud.size());
+
+        size_t points_after = filtered_cloud.size();
         size_t points_removed = total_points_before - points_after;
         double filter_percentage = total_points_before > 0 ? 
             (100.0 * points_removed / total_points_before) : 0.0;
@@ -335,24 +366,46 @@ private:
                     "Filtering: %zu points before -> %zu points after (removed %zu points, %.1f%%)",
                     total_points_before, points_after, points_removed, filter_percentage);
 
+        // Add sentinel points in beams that became empty after filtering
+        for (int c = 0; c < cols; c++) {
+            if (min_range_sq_for_col[c] == std::numeric_limits<float>::max()) {
+                
+                double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
+                int n = vertical_arc_points_;
+                
+                for (int k = 0; k < n; k++) {
+                    double elevation = (n > 1) ? (-v_fov_ / 2.0 + k * v_fov_ / (n - 1)) : 0.0;
+
+                    pcl::PointXYZI sentinel;
+                    sentinel.x = sentinel_range * cos(elevation) * cos(bearing);
+                    sentinel.y = sentinel_range * cos(elevation) * sin(bearing);
+                    sentinel.z = sentinel_range * sin(elevation);
+                    
+                    sentinel.intensity = 1.0f;
+                    
+                    filtered_cloud.push_back(sentinel);
+                }
+            }
+        }
+
         // Merge free-space sentinels with the filtered occupancy cloud.
         // Sentinels are intentionally not passed through the outlier filter —
         // they are synthetic rays, not real returns, and should always be kept.
-        *final_cloud += free_space_cloud;
+        filtered_cloud += free_space_cloud;
 
         RCLCPP_DEBUG(this->get_logger(),
                     "Free-space sentinels: %zu empty beams marked at range %.1fm",
                     free_space_cloud.size(), sentinel_range);
 
         // Publish filtered point cloud
-        if (!final_cloud->empty()) {
+        if (!filtered_cloud.empty()) {
             sensor_msgs::msg::PointCloud2 output_msg;
-            pcl::toROSMsg(*final_cloud, output_msg);
+            pcl::toROSMsg(filtered_cloud, output_msg);
             output_msg.header.frame_id = "sonar_link";
             output_msg.header.stamp = this->now();
 
             point_cloud_pub_->publish(output_msg);
-            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", final_cloud->size());
+            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", filtered_cloud.size());
         } else {
             RCLCPP_WARN(this->get_logger(), "Point cloud is empty, nothing to publish.");
         }
