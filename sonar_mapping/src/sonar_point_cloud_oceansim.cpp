@@ -43,7 +43,9 @@ public:
         this->declare_parameter("min_neighbors", 5);   // At least 5 neighbors
         this->declare_parameter("vertical_arc_points", 1); // Number of points to distribute along vertical arc (n)
         this->declare_parameter("min_consecutive_empty_beams", 5); // Min consecutive empty beams before adding sentinels
-        this->declare_parameter("median_filter_radius", 1); // R in paper; kernel size = 2R+1 (0 to disable)
+        this->declare_parameter("morph_close_radius", 2); // Morphological closing kernel half-size; kernel = 2R+1 (0 to disable)
+        this->declare_parameter("polar_image_size", 800);   // Output polar image width and height in pixels
+        this->declare_parameter("image_publish_every", 1);  // Publish debug image every N pings (0 to disable)
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
@@ -60,7 +62,9 @@ public:
         min_neighbors_ = this->get_parameter("min_neighbors").as_int();
         vertical_arc_points_ = this->get_parameter("vertical_arc_points").as_int();
         min_consecutive_empty_beams_ = this->get_parameter("min_consecutive_empty_beams").as_int();
-        median_filter_radius_ = this->get_parameter("median_filter_radius").as_int();
+        morph_close_radius_ = this->get_parameter("morph_close_radius").as_int();
+        polar_image_size_ = this->get_parameter("polar_image_size").as_int();
+        image_publish_every_ = this->get_parameter("image_publish_every").as_int();
 
         // Ensure window size is even
         if (filter_window_size_ % 2 != 0) {
@@ -74,6 +78,7 @@ public:
         qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
         qos_profile.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
         point_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("sonar_point_cloud", qos_profile);
+        sonar_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("sonar_image/filtered", qos_profile);
 
         rclcpp::QoS qos(1);
         qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
@@ -86,6 +91,7 @@ public:
 
 private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr sonar_image_pub_;
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sonar_subscriber_;
     double resolution_;
     double min_range_;
@@ -100,7 +106,10 @@ private:
     int min_neighbors_;
     int vertical_arc_points_;
     int min_consecutive_empty_beams_;
-    int median_filter_radius_;
+    int morph_close_radius_;
+    int polar_image_size_;
+    int image_publish_every_;
+    int ping_count_{0};
 
     // pcl::PointCloud<pcl::PointXYZI>::Ptr applyRadiusFilter(const pcl::PointCloud<pcl::PointXYZI>::Ptr& input_cloud) {
     //     if (input_cloud->empty()) return input_cloud;
@@ -133,6 +142,108 @@ private:
             i = j;
         }
         return mask;
+    }
+
+    /**
+     * @brief Renders a sonar intensity grid (range × beam) into a polar fan image.
+     *
+     * Each output pixel is back-projected to (range, bearing) and looked up in the
+     * intensity grid. The sonar origin is at the bottom-centre; forward is up.
+     *
+     * @param intensity_grid  CV_32FC1 matrix, rows=n_ranges, cols=n_beams, values in [0,1].
+     * @param bear_min        Left-most bearing angle in radians.
+     * @param bear_max        Right-most bearing angle in radians.
+     * @param range_res       Metres per range bin.
+     * @param total_range     Maximum range in metres.
+     * @return cv::Mat        CV_8UC3 BGR image of size polar_image_size_ × polar_image_size_.
+     */
+    cv::Mat renderPolarImage(const cv::Mat& intensity_grid,
+                             double bear_min, double bear_max,
+                             double range_res, double total_range)
+    {
+        const int S = polar_image_size_;
+        const int n_ranges = intensity_grid.rows;
+        const int n_beams  = intensity_grid.cols;
+        const double bear_range = bear_max - bear_min;
+
+        // Precompute COLORMAP_HOT LUT (256 entries)
+        cv::Mat lut_src(1, 256, CV_8UC1);
+        for (int i = 0; i < 256; i++) lut_src.at<uint8_t>(0, i) = static_cast<uint8_t>(i);
+        cv::Mat lut_bgr;
+        cv::applyColorMap(lut_src, lut_bgr, cv::COLORMAP_HOT);
+
+        cv::Mat polar(S, S, CV_8UC3, cv::Scalar(20, 20, 20));
+
+        const double cx    = S * 0.5;
+        const double cy    = S * 0.95;
+        const double scale = cy / total_range;
+
+        for (int v = 0; v < S; v++) {
+            for (int u = 0; u < S; u++) {
+                double dx =  (u - cx) / scale;
+                double dy =  (cy - v) / scale;
+                if (dy < 0.0) continue;
+
+                double range   = std::sqrt(dx * dx + dy * dy);
+                double bearing = std::atan2(dx, dy);
+
+                if (range < min_range_ || range > total_range) continue;
+                if (bearing < bear_min || bearing > bear_max)  continue;
+
+                int r = static_cast<int>(range / range_res);
+                if (r >= n_ranges) continue;
+
+                double beam_frac = (bearing - bear_min) / bear_range * (n_beams - 1);
+                int b = std::clamp(static_cast<int>(std::round(beam_frac)), 0, n_beams - 1);
+
+                uint8_t grey = static_cast<uint8_t>(
+                    std::clamp(intensity_grid.at<float>(r, b), 0.0f, 1.0f) * 255.0f);
+                polar.at<cv::Vec3b>(v, u) = lut_bgr.at<cv::Vec3b>(0, grey);
+            }
+        }
+
+        // Range rings overlay
+        const cv::Scalar grid_col(70, 70, 70);
+        const cv::Scalar text_col(180, 180, 180);
+        const double ring_step = (total_range <= 10.0) ? 1.0
+                               : (total_range <= 40.0) ? 5.0 : 10.0;
+
+        double bear_min_deg = bear_min * 180.0 / M_PI;
+        double bear_max_deg = bear_max * 180.0 / M_PI;
+        double arc_start    = 270.0 - bear_max_deg;
+        double arc_end      = 270.0 - bear_min_deg;
+
+        for (double rng = ring_step; rng <= total_range; rng += ring_step) {
+            int radius_px = static_cast<int>(rng * scale);
+            cv::ellipse(polar,
+                        cv::Point(static_cast<int>(cx), static_cast<int>(cy)),
+                        cv::Size(radius_px, radius_px),
+                        0.0, arc_start, arc_end, grid_col, 1, cv::LINE_AA);
+            int label_y = static_cast<int>(cy) - radius_px - 3;
+            if (label_y > 5 && label_y < S) {
+                cv::putText(polar, std::to_string(static_cast<int>(rng)) + "m",
+                            cv::Point(static_cast<int>(cx) + 4, label_y),
+                            cv::FONT_HERSHEY_PLAIN, 0.8, text_col, 1, cv::LINE_AA);
+            }
+        }
+
+        // Bearing lines every 10°
+        for (int deg = -80; deg <= 80; deg += 10) {
+            double angle_rad = deg * M_PI / 180.0;
+            if (angle_rad < bear_min || angle_rad > bear_max) continue;
+            int ex = static_cast<int>(cx + total_range * scale * std::sin(angle_rad));
+            int ey = static_cast<int>(cy - total_range * scale * std::cos(angle_rad));
+            cv::line(polar,
+                     cv::Point(static_cast<int>(cx), static_cast<int>(cy)),
+                     cv::Point(ex, ey), grid_col, 1, cv::LINE_AA);
+            if (deg != 0) {
+                cv::putText(polar, std::to_string(deg) + "\xc2\xb0",
+                            cv::Point(ex, ey - 4),
+                            cv::FONT_HERSHEY_PLAIN, 0.7, text_col, 1, cv::LINE_AA);
+            }
+        }
+
+        return polar;
     }
 
     /**
@@ -242,19 +353,34 @@ private:
 
         cv::Mat sonar_image = cv_ptr->image;
 
-        // ---- Median filter on the intensity image ----
-        // Kernel size = 2R+1 per the paper; R=0 disables the filter.
-        // cv::medianBlur requires CV_8U input, so we convert to 8-bit, blur, then back.
-        if (median_filter_radius_ > 0) {
-            int kernel_size = 2 * median_filter_radius_ + 1;
+        // ---- Morphological closing on the intensity image (optional) ----
+        // Fills dark gaps between nearby bright pixels (echo continuity) without
+        // darkening them, unlike a median filter. Kernel size = 2R+1; R=0 disables.
+        if (morph_close_radius_ > 0) {
+            int kernel_size = 2 * morph_close_radius_ + 1;
+            cv::Mat kernel = cv::getStructuringElement(
+                cv::MORPH_RECT, cv::Size(kernel_size, kernel_size));
             cv::Mat grid_8u;
             sonar_image.convertTo(grid_8u, CV_8U, 255.0);
-            cv::medianBlur(grid_8u, grid_8u, kernel_size);
+            cv::morphologyEx(grid_8u, grid_8u, cv::MORPH_CLOSE, kernel);
             grid_8u.convertTo(sonar_image, CV_32F, 1.0 / 255.0);
         }
 
         int rows = sonar_image.rows;
         int cols = sonar_image.cols;
+
+        // ---- Publish polar debug image (decimated) ----
+        ++ping_count_;
+        if (image_publish_every_ > 0 && (ping_count_ % image_publish_every_) == 0) {
+            double range_res_dbg = (max_range_ - min_range_) / static_cast<double>(rows);
+            double bear_min = -h_fov_ / 2.0;
+            double bear_max =  h_fov_ / 2.0;
+            cv::Mat polar = renderPolarImage(sonar_image, bear_min, bear_max,
+                                             range_res_dbg, max_range_);
+            auto polar_msg = cv_bridge::CvImage(img_msg->header, "bgr8", polar).toImageMsg();
+            polar_msg->header.frame_id = "sonar_link";
+            sonar_image_pub_->publish(*polar_msg);
+        }
 
         // Calculate range resolution from image dimensions
         // The sensor creates bins using np.arange(min_range, max_range, range_res)
