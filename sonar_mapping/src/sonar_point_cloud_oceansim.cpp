@@ -43,6 +43,7 @@ public:
         this->declare_parameter("min_neighbors", 5);   // At least 5 neighbors
         this->declare_parameter("vertical_arc_points", 1); // Number of points to distribute along vertical arc (n)
         this->declare_parameter("min_consecutive_empty_beams", 5); // Min consecutive empty beams before adding sentinels
+        this->declare_parameter("median_filter_radius", 1); // R in paper; kernel size = 2R+1 (0 to disable)
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
@@ -59,6 +60,7 @@ public:
         min_neighbors_ = this->get_parameter("min_neighbors").as_int();
         vertical_arc_points_ = this->get_parameter("vertical_arc_points").as_int();
         min_consecutive_empty_beams_ = this->get_parameter("min_consecutive_empty_beams").as_int();
+        median_filter_radius_ = this->get_parameter("median_filter_radius").as_int();
 
         // Ensure window size is even
         if (filter_window_size_ % 2 != 0) {
@@ -98,6 +100,7 @@ private:
     int min_neighbors_;
     int vertical_arc_points_;
     int min_consecutive_empty_beams_;
+    int median_filter_radius_;
 
     // pcl::PointCloud<pcl::PointXYZI>::Ptr applyRadiusFilter(const pcl::PointCloud<pcl::PointXYZI>::Ptr& input_cloud) {
     //     if (input_cloud->empty()) return input_cloud;
@@ -238,6 +241,18 @@ private:
         }
 
         cv::Mat sonar_image = cv_ptr->image;
+
+        // ---- Median filter on the intensity image ----
+        // Kernel size = 2R+1 per the paper; R=0 disables the filter.
+        // cv::medianBlur requires CV_8U input, so we convert to 8-bit, blur, then back.
+        if (median_filter_radius_ > 0) {
+            int kernel_size = 2 * median_filter_radius_ + 1;
+            cv::Mat grid_8u;
+            sonar_image.convertTo(grid_8u, CV_8U, 255.0);
+            cv::medianBlur(grid_8u, grid_8u, kernel_size);
+            grid_8u.convertTo(sonar_image, CV_32F, 1.0 / 255.0);
+        }
+
         int rows = sonar_image.rows;
         int cols = sonar_image.cols;
 
