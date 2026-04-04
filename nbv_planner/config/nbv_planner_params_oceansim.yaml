@@ -34,6 +34,12 @@ sonar_point_cloud_oceansim:
     vertical_fov: 20.0
     min_intensity_short_range: 0.4
     min_intensity_long_range: 0.2
+    filter_window_size: 7           # Window size s for beam coherence filter (must be even; s+1 beams used)
+    filter_distance_threshold: 2.0  # Max avg distance to neighbouring beam centroids (meters)
+    radius_search: 0.5              # Radius for radius outlier removal (meters, currently unused)
+    min_neighbors: 5                # Min neighbours for radius filter (currently unused)
+    vertical_arc_points: 1          # Points distributed along vertical elevation arc
+    min_consecutive_empty_beams: 10 # Min consecutive empty beams before adding free-space sentinels
     use_sim_time: true
 
 # # Parameters for the Sonar Static Transform

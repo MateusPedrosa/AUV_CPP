@@ -42,6 +42,7 @@ public:
         this->declare_parameter("radius_search", 0.5); // 50cm radius
         this->declare_parameter("min_neighbors", 5);   // At least 5 neighbors
         this->declare_parameter("vertical_arc_points", 1); // Number of points to distribute along vertical arc (n)
+        this->declare_parameter("min_consecutive_empty_beams", 5); // Min consecutive empty beams before adding sentinels
 
         std::string sonar_topic = this->get_parameter("sonar_topic").as_string();
         std::string pose_topic = this->get_parameter("pose_topic").as_string();
@@ -57,6 +58,7 @@ public:
         radius_search_ = this->get_parameter("radius_search").as_double();
         min_neighbors_ = this->get_parameter("min_neighbors").as_int();
         vertical_arc_points_ = this->get_parameter("vertical_arc_points").as_int();
+        min_consecutive_empty_beams_ = this->get_parameter("min_consecutive_empty_beams").as_int();
 
         // Ensure window size is even
         if (filter_window_size_ % 2 != 0) {
@@ -95,6 +97,7 @@ private:
     double radius_search_;
     int min_neighbors_;
     int vertical_arc_points_;
+    int min_consecutive_empty_beams_;
 
     // pcl::PointCloud<pcl::PointXYZI>::Ptr applyRadiusFilter(const pcl::PointCloud<pcl::PointXYZI>::Ptr& input_cloud) {
     //     if (input_cloud->empty()) return input_cloud;
@@ -110,6 +113,24 @@ private:
     //     outrem.filter(*filtered_cloud);
     //     return filtered_cloud;
     // }
+
+    // Returns a mask indicating which beams belong to a run of at least min_run consecutive
+    // empty beams. Single (or few) empty beams caused by surface noise are excluded.
+    std::vector<bool> sentinelMask(const std::vector<bool>& empty_flags, int min_run) {
+        int n = static_cast<int>(empty_flags.size());
+        std::vector<bool> mask(n, false);
+        int i = 0;
+        while (i < n) {
+            if (!empty_flags[i]) { i++; continue; }
+            int j = i;
+            while (j < n && empty_flags[j]) j++;
+            if (j - i >= min_run) {
+                for (int k = i; k < j; k++) mask[k] = true;
+            }
+            i = j;
+        }
+        return mask;
+    }
 
     /**
      * @brief Filters sonar features for noise and outliers using averaged point distances.
@@ -279,7 +300,10 @@ private:
                     point.x = range * cos_elev * cos(bearing);
                     point.y = range * cos_elev * sin(bearing);
                     point.z = range * sin(elevation);
-                    point.intensity = static_cast<float>(c); // store column index to recover first hit after filtering
+                    // Temporarily store the beam (column) index in the intensity field so we can
+                    // recover it after filtering. When vertical_arc_points > 1, multiple points
+                    // share the same beam index — we later use it to identify the closest one.
+                    point.intensity = static_cast<float>(c);
 
                     points_by_beam[c].push_back(point);
                 }
@@ -289,26 +313,32 @@ private:
         // For beams with no returns, insert a sentinel point just beyond max_range.
         // OctoMap treats the voxels along a ray up to (but not including) the endpoint
         // as free space, so a point at max_range + 1 marks the entire beam as free.
-        // Elevation is fixed at phi = 0 (beam centre); only the horizontal bearing matters.
+        // Only beams belonging to a run of at least min_consecutive_empty_beams_ consecutive
+        // empty beams get a sentinel — isolated gaps from surface noise are ignored.
         pcl::PointCloud<pcl::PointXYZI> free_space_cloud;
         double sentinel_range = max_range_ + 1.0;
-        for (int c = 0; c < cols; c++) {
-            if (!points_by_beam[c].empty()) continue;
+        {
+            std::vector<bool> empty_flags(cols);
+            for (int c = 0; c < cols; c++) empty_flags[c] = points_by_beam[c].empty();
+            std::vector<bool> sentinel_mask = sentinelMask(empty_flags, min_consecutive_empty_beams_);
+            for (int c = 0; c < cols; c++) {
+                if (!sentinel_mask[c]) continue;
 
-            double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
-            int n = vertical_arc_points_;
-            for (int k = 0; k < n; k++) {
-                double elevation = (n > 1)
-                    ? (-v_fov_ / 2.0 + k * v_fov_ / (n - 1))
-                    : 0.0;
+                double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
+                int n = vertical_arc_points_;
+                for (int k = 0; k < n; k++) {
+                    double elevation = (n > 1)
+                        ? (-v_fov_ / 2.0 + k * v_fov_ / (n - 1))
+                        : 0.0;
 
-                double cos_elev = cos(elevation);
-                pcl::PointXYZI sentinel;
-                sentinel.x = sentinel_range * cos_elev * cos(bearing);
-                sentinel.y = sentinel_range * cos_elev * sin(bearing);
-                sentinel.z = sentinel_range * sin(elevation);
-                sentinel.intensity = 1.0f;
-                free_space_cloud.push_back(sentinel);
+                    double cos_elev = cos(elevation);
+                    pcl::PointXYZI sentinel;
+                    sentinel.x = sentinel_range * cos_elev * cos(bearing);
+                    sentinel.y = sentinel_range * cos_elev * sin(bearing);
+                    sentinel.z = sentinel_range * sin(elevation);
+                    sentinel.intensity = 1.0f;
+                    free_space_cloud.push_back(sentinel);
+                }
             }
         }
 
@@ -324,35 +354,34 @@ private:
 
         filtered_cloud.header.frame_id = "sonar_link";
 
+        // When vertical_arc_points > 1, each sonar return spawns multiple points distributed
+        // along the vertical arc. All copies share the same beam index (stored in intensity)
+        // and the same range, so they are all at the same distance from the sensor. Only the
+        // closest point per beam should be treated as a surface hit (intensity = 1); the others
+        // are elevation-arc duplicates and should be marked as non-hits (intensity = 0) so that
+        // OctoMap does not log the same obstacle multiple times at different heights.
+        //
+        // Pass 1: find the minimum squared distance to the sensor for each beam.
         std::vector<float> min_range_sq_for_col(cols, std::numeric_limits<float>::max());
-
-        // Scan the filtered cloud to find the closest surviving point for each beam
         for (size_t i = 0; i < filtered_cloud.size(); i++) {
             const auto& p = filtered_cloud.points[i];
-            
-            // Retrieve column index from the intensity field
-            int c = static_cast<int>(p.intensity); 
-            
-            // Calculate squared distance to sensor origin
+            int c = static_cast<int>(p.intensity); // beam index stored earlier
             float dist_sq = p.x * p.x + p.y * p.y + p.z * p.z;
-            
-            // If this point is closer than the current record holder for this beam, update it
             if (dist_sq < min_range_sq_for_col[c]) {
                 min_range_sq_for_col[c] = dist_sq;
             }
         }
 
-        float epsilon = 0.1f;
+        // Pass 2: rewrite intensity to its final meaning — 1 for the nearest point on a beam
+        // (the actual surface hit), 0 for farther arc duplicates on the same beam.
+        // epsilon guards the floating-point equality check; both passes use the same formula
+        // on the same float values so the results are bitwise identical in practice.
+        float epsilon = 0.0001f;
         for (size_t i = 0; i < filtered_cloud.size(); i++) {
             auto& p = filtered_cloud.points[i];
             int c = static_cast<int>(p.intensity);
             float dist_sq = p.x * p.x + p.y * p.y + p.z * p.z;
-
-            if (std::abs(dist_sq - min_range_sq_for_col[c]) < epsilon) {
-                p.intensity = 1.0f; 
-            } else {
-                p.intensity = 0.0f;
-            }
+            p.intensity = (std::abs(dist_sq - min_range_sq_for_col[c]) < epsilon) ? 1.0f : 0.0f;
         }
 
         RCLCPP_DEBUG(this->get_logger(), "Filtered cloud from %zu beams to %zu points", points_by_beam.size(), filtered_cloud.size());
@@ -366,13 +395,21 @@ private:
                     "Filtering: %zu points before -> %zu points after (removed %zu points, %.1f%%)",
                     total_points_before, points_after, points_removed, filter_percentage);
 
-        // Add sentinel points in beams that became empty after filtering
-        for (int c = 0; c < cols; c++) {
-            if (min_range_sq_for_col[c] == std::numeric_limits<float>::max()) {
-                
+        // Add sentinel points in beams that became empty after filtering.
+        // Only add sentinels for runs of at least min_consecutive_empty_beams_ consecutive
+        // empty beams — isolated gaps from surface noise are ignored.
+        {
+            std::vector<bool> empty_post(cols);
+            for (int c = 0; c < cols; c++) {
+                empty_post[c] = (min_range_sq_for_col[c] == std::numeric_limits<float>::max());
+            }
+            std::vector<bool> sentinel_mask = sentinelMask(empty_post, min_consecutive_empty_beams_);
+            for (int c = 0; c < cols; c++) {
+                if (!sentinel_mask[c]) continue;
+
                 double bearing = (static_cast<double>(c) / cols - 0.5) * h_fov_;
                 int n = vertical_arc_points_;
-                
+
                 for (int k = 0; k < n; k++) {
                     double elevation = (n > 1) ? (-v_fov_ / 2.0 + k * v_fov_ / (n - 1)) : 0.0;
 
@@ -380,9 +417,7 @@ private:
                     sentinel.x = sentinel_range * cos(elevation) * cos(bearing);
                     sentinel.y = sentinel_range * cos(elevation) * sin(bearing);
                     sentinel.z = sentinel_range * sin(elevation);
-                    
                     sentinel.intensity = 1.0f;
-                    
                     filtered_cloud.push_back(sentinel);
                 }
             }
