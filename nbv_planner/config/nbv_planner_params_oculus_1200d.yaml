@@ -32,8 +32,14 @@ sonar_point_cloud:
     min_range: 0.1
     horizontal_fov: 60.0
     vertical_fov: 12.0
-    min_intensity_short_range: 0.4
-    min_intensity_long_range: 0.2
+    min_intensity_short_range: 0.1
+    min_intensity_long_range: 0.1
+    filter_window_size: 7
+    filter_distance_threshold: 2.0
+    morph_close_radius: 2
+    polar_image_size: 800
+    image_publish_every: 10
+    min_consecutive_empty_beams: 50
     use_sim_time: true
 
 sonar_tf_publisher:
