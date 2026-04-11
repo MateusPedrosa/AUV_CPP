@@ -54,7 +54,6 @@ target_include_directories(sonar_point_cloud_oceansim PUBLIC
 target_link_libraries(sonar_point_cloud_oceansim
   ${PCL_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  oculus_interfaces::oculus_interfaces__rosidl_typesupport_cpp
 )
 ament_target_dependencies(sonar_point_cloud_oceansim
   rclcpp

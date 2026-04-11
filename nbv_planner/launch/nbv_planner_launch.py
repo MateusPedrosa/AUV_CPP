@@ -10,7 +10,7 @@ from launch.conditions import IfCondition, UnlessCondition
 def generate_launch_description():
     pkg_share = get_package_share_directory('nbv_planner')
     
-    oculus_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oculus_1200d.yaml')
+    oculus_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oculus_m750d.yaml')
     oceansim_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oceansim.yaml')
 
     declare_simulator = DeclareLaunchArgument(
@@ -35,8 +35,10 @@ def generate_launch_description():
 
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time',
-        default_value='true', # Set to true since you are using MCAP playback
-        description='Use simulation (log) clock if true'
+        default_value=PythonExpression([
+            "'true' if '", LaunchConfiguration('simulator'), "' == 'true' else 'false'"
+        ]),
+        description='Use simulation (log) clock if true. Defaults to true for simulator, false for real hardware.'
     )
 
     #################################

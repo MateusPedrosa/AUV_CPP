@@ -8,10 +8,10 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/header.hpp>
-#include <oculus_interfaces/msg/oculus_ping.hpp>
+#include <oculus_interfaces/msg/ping.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 
-#include <cv_bridge/cv_bridge.hpp>
+#include <cv_bridge/cv_bridge.h>
 #include <opencv2/opencv.hpp>
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -25,7 +25,7 @@ class SonarPointCloud : public rclcpp::Node
 public:
     SonarPointCloud() : Node("sonar_point_cloud") {
         // Parameters
-        this->declare_parameter("sonar_topic", "/oceansim/robot/imaging_sonar");
+        this->declare_parameter("sonar_topic", "/sonar/ping");
         this->declare_parameter("pose_topic", "/oceansim/robot/pose");
         this->declare_parameter("resolution", 0.1); // 10cm voxels
         this->declare_parameter("min_range", 0.1); // Minimum sonar range in meters
@@ -73,9 +73,9 @@ public:
         sonar_image_filt_pub_ = this->create_publisher<sensor_msgs::msg::Image>("sonar_image/filtered", qos_profile);
 
         rclcpp::QoS qos(1);
-        qos.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
+        qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
         qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
-        sonar_subscriber_ = this->create_subscription<oculus_interfaces::msg::OculusPing>(
+        sonar_subscriber_ = this->create_subscription<oculus_interfaces::msg::Ping>(
             sonar_topic, qos,
             std::bind(&SonarPointCloud::pingCallback, this, _1)
         );
@@ -85,7 +85,7 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr sonar_image_raw_pub_;
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr sonar_image_filt_pub_;
-    rclcpp::Subscription<oculus_interfaces::msg::OculusPing>::SharedPtr sonar_subscriber_;
+    rclcpp::Subscription<oculus_interfaces::msg::Ping>::SharedPtr sonar_subscriber_;
     double resolution_;
     double min_range_;
     double max_range_;
@@ -321,7 +321,7 @@ private:
         return filtered_cloud;
     }
 
-    void pingCallback(const oculus_interfaces::msg::OculusPing::ConstSharedPtr& ping_msg) {
+    void pingCallback(const oculus_interfaces::msg::Ping::ConstSharedPtr& ping_msg) {
         const uint16_t n_beams  = ping_msg->n_beams;
         const uint16_t n_ranges = ping_msg->n_ranges;
 
@@ -341,8 +341,9 @@ private:
         // Use them directly when available; fall back to uniform distribution over h_fov.
         std::vector<double> bearings(n_beams);
         if (static_cast<uint16_t>(ping_msg->bearings.size()) == n_beams) {
+            // bearings are in 100ths of a degree → multiply by 0.01 to get degrees, then to radians
             for (uint16_t b = 0; b < n_beams; b++) {
-                bearings[b] = static_cast<double>(ping_msg->bearings[b]) * M_PI / 180.0;
+                bearings[b] = static_cast<double>(ping_msg->bearings[b]) * 0.01 * M_PI / 180.0;
             }
         } else {
             RCLCPP_WARN_ONCE(this->get_logger(),
@@ -355,37 +356,40 @@ private:
         }
 
         // ---- Decode raw ping data into a normalised intensity grid ----
-        // Data layout: n_ranges × n_beams, row-major.
-        // ping_msg->step gives the number of bytes per row (all beams).
-        const size_t bytes_per_sample = (ping_msg->step > 0) ? (ping_msg->step / n_beams) : 1;
+        // Data layout: n_ranges rows, each of size step bytes.
+        // ping_msg->sample_size gives the number of bytes per sample.
+        // When ping_msg->has_gains is true, each row starts with a 4-byte gain (uint32 LE)
+        // before the n_beams * sample_size data bytes.
+        const size_t bytes_per_sample = (ping_msg->sample_size > 0) ? ping_msg->sample_size : 1;
+        const size_t gain_offset      = ping_msg->has_gains ? 4 : 0;
         const size_t expected_bytes   = static_cast<size_t>(n_ranges) * ping_msg->step;
 
-        if (ping_msg->data.size() < expected_bytes) {
+        if (ping_msg->ping_data.size() < expected_bytes) {
             RCLCPP_WARN(this->get_logger(),
                         "Ping data size mismatch: expected %zu bytes, got %zu. Skipping.",
-                        expected_bytes, ping_msg->data.size());
+                        expected_bytes, ping_msg->ping_data.size());
             return;
         }
 
         RCLCPP_INFO_ONCE(this->get_logger(),
                          "First ping: n_beams=%u, n_ranges=%u, range=%.2f m, range_res=%.6f m, "
-                         "step=%u, frequency=%.0f Hz, gain=%.1f",
+                         "sample_size=%zu, frequency=%.0f Hz, gain=%.1f",
                          n_beams, n_ranges, total_range, range_res,
-                         bytes_per_sample, ping_msg->frequency, ping_msg->gain);
+                         bytes_per_sample, ping_msg->frequency, ping_msg->gain_percent);
 
         const double max_raw = (bytes_per_sample == 2) ? 65535.0 : 255.0;
 
         cv::Mat intensity_grid(n_ranges, n_beams, CV_32FC1);
         for (uint16_t r = 0; r < n_ranges; r++) {
             for (uint16_t b = 0; b < n_beams; b++) {
-                size_t idx = (static_cast<size_t>(r) * n_beams + b) * bytes_per_sample;
+                size_t idx = static_cast<size_t>(r) * ping_msg->step + gain_offset + b * bytes_per_sample;
                 double raw_val = 0.0;
                 if (bytes_per_sample == 2) {
                     raw_val = static_cast<double>(
-                        static_cast<uint16_t>(ping_msg->data[idx]) |
-                        (static_cast<uint16_t>(ping_msg->data[idx + 1]) << 8));
+                        static_cast<uint16_t>(ping_msg->ping_data[idx]) |
+                        (static_cast<uint16_t>(ping_msg->ping_data[idx + 1]) << 8));
                 } else {
-                    raw_val = static_cast<double>(ping_msg->data[idx]);
+                    raw_val = static_cast<double>(ping_msg->ping_data[idx]);
                 }
                 intensity_grid.at<float>(r, b) = static_cast<float>(raw_val / max_raw);
             }
