@@ -48,9 +48,15 @@ private:
 
     void publishTransform()
     {
+        auto now = this->get_clock()->now();
+        if (now.nanoseconds() == 0) {
+            // Sim time not yet available; skip to avoid flooding TF with t=0 transforms
+            return;
+        }
+
         geometry_msgs::msg::TransformStamped t;
 
-        t.header.stamp = this->get_clock()->now();
+        t.header.stamp = now;
         t.header.frame_id = this->get_parameter("robot_frame").as_string();
         t.child_frame_id = this->get_parameter("sonar_frame").as_string();
 

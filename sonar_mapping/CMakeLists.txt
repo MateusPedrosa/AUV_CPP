@@ -15,7 +15,7 @@ find_package(pcl_conversions REQUIRED)
 #find_package(message_filters REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(oculus_interfaces REQUIRED)
+find_package(oculus_interfaces_blueye REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(blueye_interfaces REQUIRED)
@@ -27,7 +27,7 @@ target_include_directories(sonar_point_cloud PUBLIC
 target_link_libraries(sonar_point_cloud
   ${PCL_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  oculus_interfaces::oculus_interfaces__rosidl_typesupport_cpp
+  oculus_interfaces_blueye::oculus_interfaces_blueye__rosidl_typesupport_cpp
 )
 ament_target_dependencies(sonar_point_cloud
   rclcpp
@@ -54,7 +54,7 @@ target_include_directories(sonar_point_cloud_oceansim PUBLIC
 target_link_libraries(sonar_point_cloud_oceansim
   ${PCL_LIBRARIES}
   ${OpenCV_LIBRARIES}
-  oculus_interfaces::oculus_interfaces__rosidl_typesupport_cpp
+  oculus_interfaces_blueye::oculus_interfaces_blueye__rosidl_typesupport_cpp
 )
 ament_target_dependencies(sonar_point_cloud_oceansim
   rclcpp

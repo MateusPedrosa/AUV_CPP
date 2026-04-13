@@ -9,7 +9,7 @@ nbv_planner_node:
     exploration_sensor_min_range: 0.1
     max_free_space: 0.0
     min_height_free_space: 0.0
-    exploration_sensor_hfov: 1.0472  # 60 deg in rad
+    exploration_sensor_hfov: 2.2689  # 130 deg in rad
     exploration_sensor_vfov: 0.2094  # 12 deg in rad
     inspection_sensor_frames: ["camera_forward_link", "camera_bottom_link"]
     exploration_sensor_frame: "sonar_link"
@@ -38,7 +38,7 @@ sonar_point_cloud:
     filter_distance_threshold: 2.0
     morph_close_radius: 2
     polar_image_size: 800
-    image_publish_every: 10
+    image_publish_every: 0
     min_consecutive_empty_beams: 50
     use_sim_time: true
 
@@ -48,6 +48,6 @@ sonar_tf_publisher:
     pitch_topic: "/blueye/sensor/sonar/servo_angle"
     sonar_frame: "sonar_link"
     robot_frame: "base_link"
-    translation_x: 0.1
+    translation_x: 0.2
     translation_y: 0.0
-    translation_z: 0.2
+    translation_z: 0.08
