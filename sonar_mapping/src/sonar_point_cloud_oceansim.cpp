@@ -76,7 +76,7 @@ public:
         // TODO: check qos
         rclcpp::QoS qos_profile(1);
         qos_profile.reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
-        qos_profile.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
+        qos_profile.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
         point_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("sonar_point_cloud", qos_profile);
         sonar_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("sonar_image/filtered", qos_profile);
 
@@ -537,12 +537,16 @@ private:
                     total_points_before, points_after, points_removed, filter_percentage);
 
         // Add sentinel points in beams that became empty after filtering.
+        // Only add sentinels for beams that *had* returns before filtering but lost them all
+        // to the window filter — beams that were empty from the start were already handled
+        // by the pre-filter sentinel pass (free_space_cloud) and must not be added again.
         // Only add sentinels for runs of at least min_consecutive_empty_beams_ consecutive
         // empty beams — isolated gaps from surface noise are ignored.
         {
             std::vector<bool> empty_post(cols);
             for (int c = 0; c < cols; c++) {
-                empty_post[c] = (min_range_sq_for_col[c] == std::numeric_limits<float>::max());
+                empty_post[c] = !points_by_beam[c].empty() &&
+                                (min_range_sq_for_col[c] == std::numeric_limits<float>::max());
             }
             std::vector<bool> sentinel_mask = sentinelMask(empty_post, min_consecutive_empty_beams_);
             for (int c = 0; c < cols; c++) {
