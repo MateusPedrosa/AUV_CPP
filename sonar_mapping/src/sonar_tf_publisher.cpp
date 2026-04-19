@@ -7,15 +7,16 @@
 class SonarTfPublisher : public rclcpp::Node
 {
 public:
-    SonarTfPublisher() : Node("sonar_tf_publisher"), current_pitch_(0.0)
+    SonarTfPublisher() : Node("sonar_tf_publisher"), current_pitch_(0.0), current_roll_(0.0)
     {
         this->declare_parameter("pitch_topic", "/blueye/sensor/sonar/servo_angle");
+        this->declare_parameter("roll_topic", "/oceansim/robot/sonar_roll");
         this->declare_parameter("sonar_frame", "sonar_link");
         this->declare_parameter("robot_frame", "base_link");
         this->declare_parameter("translation_x", 0.1);
         this->declare_parameter("translation_y", 0.0);
         this->declare_parameter("translation_z", 0.2);
-        
+
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
 
         rclcpp::QoS qos(1);
@@ -25,6 +26,11 @@ public:
         pitch_sub_ = this->create_subscription<blueye_interfaces::msg::FloatStamped>(
             this->get_parameter("pitch_topic").as_string(), qos,
             std::bind(&SonarTfPublisher::pitchCallback, this, std::placeholders::_1)
+        );
+
+        roll_sub_ = this->create_subscription<blueye_interfaces::msg::FloatStamped>(
+            this->get_parameter("roll_topic").as_string(), qos,
+            std::bind(&SonarTfPublisher::rollCallback, this, std::placeholders::_1)
         );
 
         // Publish at 50 Hz so TF never goes stale, even if the servo is slow
@@ -37,13 +43,19 @@ public:
 private:
     std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::Subscription<blueye_interfaces::msg::FloatStamped>::SharedPtr pitch_sub_;
+    rclcpp::Subscription<blueye_interfaces::msg::FloatStamped>::SharedPtr roll_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
     double current_pitch_;
-
+    double current_roll_;
 
     void pitchCallback(const blueye_interfaces::msg::FloatStamped::SharedPtr msg)
     {
         current_pitch_ = msg->data * M_PI / 180.0;
+    }
+
+    void rollCallback(const blueye_interfaces::msg::FloatStamped::SharedPtr msg)
+    {
+        current_roll_ = msg->data * M_PI / 180.0;
     }
 
     void publishTransform()
@@ -65,7 +77,7 @@ private:
         t.transform.translation.z = this->get_parameter("translation_z").as_double();
 
         tf2::Quaternion q;
-        q.setRPY(0.0, current_pitch_, 0.0);
+        q.setRPY(current_roll_, current_pitch_, 0.0);
         t.transform.rotation.x = q.x();
         t.transform.rotation.y = q.y();
         t.transform.rotation.z = q.z();
