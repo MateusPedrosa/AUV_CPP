@@ -4,25 +4,28 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('nbv_planner')
-    
-    oculus_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oculus_1200d.yaml')
-    oceansim_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oceansim.yaml')
 
-    declare_simulator = DeclareLaunchArgument(
-        'simulator',
-        default_value='false',
-        description='If true, runs sonar_point_cloud_oceansim. If false, runs sonar_point_cloud.'
+    blueye_params_path   = os.path.join(pkg_share, 'config', 'nbv_planner_params_oculus_m750d.yaml')
+    oceansim_params_path = os.path.join(pkg_share, 'config', 'nbv_planner_params_oceansim.yaml')
+    bluerov_params_path  = os.path.join(pkg_share, 'config', 'nbv_planner_params_bluerov.yaml')
+
+    declare_sonar = DeclareLaunchArgument(
+        'sonar',
+        default_value='blueye',
+        description='Sonar backend: "blueye" (Oculus M750d), "oceansim" (Isaac Sim), or "bluerov" (Sonoptix ECHO).'
     )
 
     declare_params_file = DeclareLaunchArgument(
         'params_file',
         default_value=PythonExpression([
-            "'", oceansim_params_path, "' if '", LaunchConfiguration('simulator'), "' == 'true' else '", oculus_params_path, "'"
+            "'", blueye_params_path,   "' if '", LaunchConfiguration('sonar'), "' == 'blueye' else ",
+            "('", oceansim_params_path, "' if '", LaunchConfiguration('sonar'), "' == 'oceansim' else ",
+            "'", bluerov_params_path, "')",
         ]),
         description='Full path to the ROS 2 parameters file to use'
     )
@@ -35,19 +38,17 @@ def generate_launch_description():
 
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time',
-        default_value='true', # Set to true since you are using MCAP playback
-        description='Use simulation (log) clock if true'
+        default_value=PythonExpression([
+            "'true' if '", LaunchConfiguration('sonar'), "' == 'oceansim' else 'false'"
+        ]),
+        description='Use simulation clock if true. Always false for real hardware.'
     )
 
-    #################################
-    
     declare_use_rviz = DeclareLaunchArgument(
         'use_rviz',
         default_value='false',
         description='Launch RViz for visualization'
     )
-
-    #################################
 
     declare_log_level = DeclareLaunchArgument(
         'log_level',
@@ -76,21 +77,6 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_rviz')),
         output='screen'
     )
-
-    # static_transform_publisher_sonar_node = Node(
-    #     package='tf2_ros',
-    #     executable='static_transform_publisher',
-    #     arguments=[
-    #         '--x',           '0.1',
-    #         '--y',           '0.0',
-    #         '--z',           '0.2',
-    #         '--roll',        '0.0',
-    #         '--pitch',       '0.0',
-    #         '--yaw',         '0.0',
-    #         '--frame-id',    'base_link',
-    #         '--child-frame-id', 'sonar_link'
-    #     ]
-    # )
 
     sonar_tf_publisher_node = Node(
         package='sonar_mapping',
@@ -132,28 +118,45 @@ def generate_launch_description():
         parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}]
     )
 
+    # BlueEye — Oculus M750d
     sonar_point_cloud_node = Node(
         package='sonar_mapping',
         executable='sonar_point_cloud',
         output='screen',
-        condition=UnlessCondition(LaunchConfiguration('simulator')),
+        condition=IfCondition(PythonExpression([
+            "'true' if '", LaunchConfiguration('sonar'), "' == 'blueye' else 'false'"
+        ])),
         parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
-    # Simulator Sonar Node (Runs if simulator is true)
+    # Isaac Sim sonar node
     sonar_point_cloud_oceansim_node = Node(
         package='sonar_mapping',
         executable='sonar_point_cloud_oceansim',
         output='screen',
-        condition=IfCondition(LaunchConfiguration('simulator')),
+        condition=IfCondition(PythonExpression([
+            "'true' if '", LaunchConfiguration('sonar'), "' == 'oceansim' else 'false'"
+        ])),
+        parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+    )
+
+    # BlueROV + Sonoptix ECHO node
+    sonar_point_cloud_bluerov_node = Node(
+        package='sonar_mapping',
+        executable='sonar_point_cloud_bluerov',
+        output='screen',
+        condition=IfCondition(PythonExpression([
+            "'true' if '", LaunchConfiguration('sonar'), "' == 'bluerov' else 'false'"
+        ])),
         parameters=[LaunchConfiguration('params_file'), {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
     return LaunchDescription([
         # Declare arguments
-        declare_simulator,
+        declare_sonar,
         declare_params_file,
         declare_cloud_topic,
         declare_use_rviz,
@@ -163,10 +166,10 @@ def generate_launch_description():
         # Launch nodes
         nbv_planner_node,
         rviz_node,
-        # static_transform_publisher_sonar_node,
         static_transform_publisher_forward_camera_node,
         static_transform_publisher_bottom_camera_node,
         sonar_point_cloud_node,
         sonar_point_cloud_oceansim_node,
+        sonar_point_cloud_bluerov_node,
         sonar_tf_publisher_node,
     ])

@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(pcl_conversions REQUIRED)
@@ -64,6 +65,23 @@ ament_target_dependencies(sonar_point_cloud_oceansim
   pcl_conversions
 )
 
+add_executable(sonar_point_cloud_bluerov src/sonar_point_cloud_bluerov.cpp)
+target_include_directories(sonar_point_cloud_bluerov PUBLIC
+  ${PCL_INCLUDE_DIRS}
+)
+target_link_libraries(sonar_point_cloud_bluerov
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
+ament_target_dependencies(sonar_point_cloud_bluerov
+  rclcpp
+  sensor_msgs
+  std_msgs
+  geometry_msgs
+  cv_bridge
+  pcl_conversions
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
@@ -79,6 +97,7 @@ endif()
 install(TARGETS
   sonar_point_cloud
   sonar_point_cloud_oceansim
+  sonar_point_cloud_bluerov
   sonar_tf_publisher
   DESTINATION lib/${PROJECT_NAME}
 )

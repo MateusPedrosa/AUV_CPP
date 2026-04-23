@@ -1,0 +1,51 @@
+# NBV Planner Parameters — BlueROV + Sonoptix ECHO
+nbv_planner_node:
+  ros__parameters:
+    map_frame: "map"
+    robot_frame: "base_link"
+    octree_resolution: 0.2
+    planning_frequency: 0.5
+    exploration_sensor_max_range: 12.0
+    exploration_sensor_min_range: 0.1
+    max_free_space: 0.0
+    min_height_free_space: 0.0
+    exploration_sensor_hfov: 2.0944  # 120 deg in rad (Sonoptix ECHO, range <= 30 m)
+    exploration_sensor_vfov: 0.3491  # 20 deg in rad
+    inspection_sensor_frames: ["camera_forward_link", "camera_bottom_link"]
+    exploration_sensor_frame: "sonar_link"
+    camera_fx: 731.79
+    camera_fy: 731.79
+    camera_cx: 970.94
+    camera_cy: 600.37
+    camera_width: 1216
+    camera_height: 1936
+    camera_max_range: 2.0
+    cloud_topic: "/sonar_point_cloud"
+
+# Sonar Point Cloud Node Parameters — Sonoptix ECHO
+sonar_point_cloud_bluerov:
+  ros__parameters:
+    sonar_topic: "/sonar/echo/data"
+    resolution: 0.2
+    max_range: 12.0           # Fallback; overridden per-ping from pixel [0,0]
+    min_range: 0.1
+    horizontal_fov: 120.0    # Fallback; overridden per-ping (120° for range<=30m, 90° otherwise)
+    vertical_fov: 20.0
+    min_intensity_short_range: 0.1
+    min_intensity_long_range: 0.05
+    filter_window_size: 6
+    filter_distance_threshold: 2.0
+    vertical_arc_points: 1
+    min_consecutive_empty_beams: 100
+    morph_close_radius: 2
+    polar_image_size: 800
+    image_hz: 5.0
+
+sonar_tf_publisher:
+  ros__parameters:
+    pitch_topic: "/servo/pitch_angle"
+    sonar_frame: "sonar_link"
+    robot_frame: "base_link"
+    translation_x: 0.3
+    translation_y: 0.0
+    translation_z: 0.3
