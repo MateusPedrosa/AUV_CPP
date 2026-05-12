@@ -34,8 +34,11 @@ public:
         this->declare_parameter("resolution", 0.1); // 10cm voxels
         this->declare_parameter("min_range", 0.1); // Minimum sonar range in meters
         this->declare_parameter("max_range", 40.0); // Maximum sonar range in meters
-        this->declare_parameter("min_intensity_short_range", 0.4); // Minimum intensity threshold for short range
-        this->declare_parameter("min_intensity_long_range", 0.2); // Minimum intensity threshold for long range
+        this->declare_parameter("min_intensity_short_range", 0.1);
+        this->declare_parameter("min_intensity_long_range", 0.03);
+        this->declare_parameter("sauvola_window_size", 70);  // Local window side length (odd; pixels in range×beam space)
+        this->declare_parameter("sauvola_k", 0.1);           // Sensitivity: higher = more aggressive threshold
+        this->declare_parameter("sauvola_r", 0.5);           // Max std normaliser (0.5 for [0,1]-normalised images)
         this->declare_parameter("horizontal_fov", 130.0); // Horizontal field of view in degrees
         this->declare_parameter("vertical_fov", 20.0); // Vertical field of view in degrees
         this->declare_parameter("filter_window_size", 7); // Window size s (must be even, s+1 total beams)
@@ -45,6 +48,8 @@ public:
         this->declare_parameter("vertical_arc_points", 1); // Number of points to distribute along vertical arc (n)
         this->declare_parameter("min_consecutive_empty_beams", 5); // Min consecutive empty beams before adding sentinels
         this->declare_parameter("morph_close_radius", 2); // Morphological closing kernel half-size; kernel = 2R+1 (0 to disable)
+        this->declare_parameter("median_blur_size", 0);    // Median blur kernel size (must be odd, 0 to disable)
+        this->declare_parameter("morph_open_radius", 0);   // Morphological opening kernel half-size; kernel = 2R+1 (0 to disable)
         this->declare_parameter("polar_image_size", 800);   // Output polar image width and height in pixels
         this->declare_parameter("image_hz", 5.0);           // Polar image publish rate in Hz (0 to disable)
 
@@ -55,6 +60,14 @@ public:
         max_range_ = this->get_parameter("max_range").as_double();
         min_intensity_short_range_ = this->get_parameter("min_intensity_short_range").as_double();
         min_intensity_long_range_ = this->get_parameter("min_intensity_long_range").as_double();
+        sauvola_window_size_ = this->get_parameter("sauvola_window_size").as_int();
+        if (sauvola_window_size_ % 2 == 0) {
+            RCLCPP_WARN(this->get_logger(), "sauvola_window_size must be odd, adjusting %d to %d",
+                        sauvola_window_size_, sauvola_window_size_ + 1);
+            sauvola_window_size_++;
+        }
+        sauvola_k_ = this->get_parameter("sauvola_k").as_double();
+        sauvola_r_ = this->get_parameter("sauvola_r").as_double();
         h_fov_ = this->get_parameter("horizontal_fov").as_double() * M_PI / 180.0;
         v_fov_ = this->get_parameter("vertical_fov").as_double() * M_PI / 180.0;
         filter_window_size_ = this->get_parameter("filter_window_size").as_int();
@@ -64,6 +77,13 @@ public:
         vertical_arc_points_ = this->get_parameter("vertical_arc_points").as_int();
         min_consecutive_empty_beams_ = this->get_parameter("min_consecutive_empty_beams").as_int();
         morph_close_radius_ = this->get_parameter("morph_close_radius").as_int();
+        median_blur_size_ = this->get_parameter("median_blur_size").as_int();
+        if (median_blur_size_ > 0 && median_blur_size_ % 2 == 0) {
+            RCLCPP_WARN(this->get_logger(), "median_blur_size must be odd, adjusting %d to %d",
+                        median_blur_size_, median_blur_size_ + 1);
+            median_blur_size_++;
+        }
+        morph_open_radius_ = this->get_parameter("morph_open_radius").as_int();
         polar_image_size_ = this->get_parameter("polar_image_size").as_int();
         double image_hz = this->get_parameter("image_hz").as_double();
 
@@ -108,6 +128,9 @@ private:
     double max_range_;
     double min_intensity_short_range_;
     double min_intensity_long_range_;
+    int sauvola_window_size_;
+    double sauvola_k_;
+    double sauvola_r_;
     double h_fov_;
     double v_fov_;
     int filter_window_size_;
@@ -117,6 +140,8 @@ private:
     int vertical_arc_points_;
     int min_consecutive_empty_beams_;
     int morph_close_radius_;
+    int median_blur_size_;
+    int morph_open_radius_;
     int polar_image_size_;
 
     // Cached data for the image timer callback
@@ -399,28 +424,18 @@ private:
         // Zero out the embedded range pixel so it doesn't create a false return at (0,0)
         sonar_image.at<float>(0, 0) = 0.0f;
 
-        // ---- Morphological closing on the intensity image (optional) ----
-        // Fills dark gaps between nearby bright pixels (echo continuity) without
-        // darkening them, unlike a median filter. Kernel size = 2R+1; R=0 disables.
-        if (morph_close_radius_ > 0) {
-            int kernel_size = 2 * morph_close_radius_ + 1;
-            cv::Mat kernel = cv::getStructuringElement(
-                cv::MORPH_RECT, cv::Size(kernel_size, kernel_size));
+        // ---- Step 1: Optional median blur on raw image ----
+        // Removes salt-and-pepper noise before adaptive thresholding, preventing
+        // isolated hot pixels from artificially inflating local variance.
+        if (median_blur_size_ > 0) {
             cv::Mat grid_8u;
             sonar_image.convertTo(grid_8u, CV_8U, 255.0);
-            cv::morphologyEx(grid_8u, grid_8u, cv::MORPH_CLOSE, kernel);
+            cv::medianBlur(grid_8u, grid_8u, median_blur_size_);
             grid_8u.convertTo(sonar_image, CV_32F, 1.0 / 255.0);
         }
 
         int rows = sonar_image.rows;
         int cols = sonar_image.cols;
-
-        // Cache the processed intensity grid for the image timer callback.
-        {
-            std::lock_guard<std::mutex> lock(grid_mutex_);
-            latest_intensity_grid_ = sonar_image.clone();
-            latest_stamp_ = img_msg->header.stamp;
-        }
 
         // Calculate range resolution from image dimensions
         // The sensor creates bins using np.arange(min_range, max_range, range_res)
@@ -450,6 +465,90 @@ private:
             elev_trig[k] = {std::cos(elev), std::sin(elev)};
         }
 
+        // ---- Step 2: Sauvola Adaptive Thresholding (optional) ----
+        // T(r,c) = mean(r,c) * (1 + k * (std(r,c) / R - 1))
+        // Disabled when sauvola_window_size == 0; falls back to fixed per-range thresholds.
+        cv::Mat valid_mask;
+        if (sauvola_window_size_ > 0) {
+            cv::Size ksize(sauvola_window_size_, sauvola_window_size_);
+
+            cv::Mat mean_mat;
+            cv::boxFilter(sonar_image, mean_mat, CV_32F, ksize,
+                          cv::Point(-1, -1), true, cv::BORDER_REPLICATE);
+
+            cv::Mat sq_image;
+            cv::multiply(sonar_image, sonar_image, sq_image);
+            cv::Mat mean_sq_mat;
+            cv::boxFilter(sq_image, mean_sq_mat, CV_32F, ksize,
+                          cv::Point(-1, -1), true, cv::BORDER_REPLICATE);
+
+            cv::Mat variance = mean_sq_mat - mean_mat.mul(mean_mat);
+            cv::Mat std_mat;
+            cv::sqrt(cv::max(variance, 0.0f), std_mat);
+
+            cv::Mat sauvola_thresh = mean_mat.mul(
+                1.0f + static_cast<float>(sauvola_k_) *
+                       (std_mat / static_cast<float>(sauvola_r_) - 1.0f));
+
+            // Apply an absolute minimum intensity threshold to prevent noise in shadows.
+            // The noise floor drops with range, so interpolate between short and long range limits.
+            for (int r = 0; r < sonar_image.rows; r++) {
+                float alpha = static_cast<float>(r) / std::max(1, sonar_image.rows - 1);
+                float min_thresh = min_intensity_short_range_ * (1.0f - alpha) +
+                                   min_intensity_long_range_ * alpha;
+
+                for (int c = 0; c < sonar_image.cols; c++) {
+                    if (sauvola_thresh.at<float>(r, c) < min_thresh) {
+                        sauvola_thresh.at<float>(r, c) = min_thresh;
+                    }
+                }
+            }
+
+            cv::compare(sonar_image, sauvola_thresh, valid_mask, cv::CMP_GE);
+        } else {
+            // Fixed per-range threshold fallback
+            valid_mask = cv::Mat::zeros(rows, cols, CV_8UC1);
+            for (int r = 0; r < rows; r++) {
+                double range = min_range_ + (r * range_res);
+                float min_thresh = (range < 3.0) ? static_cast<float>(min_intensity_short_range_)
+                                                 : static_cast<float>(min_intensity_long_range_);
+                for (int c = 0; c < cols; c++) {
+                    if (sonar_image.at<float>(r, c) >= min_thresh)
+                        valid_mask.at<uint8_t>(r, c) = 255;
+                }
+            }
+        }
+
+        // ---- Step 3 & 4: Morphological Closing & Opening (Binary) ----
+        // Clean up the binary mask of valid returns.
+        // Closing fills gaps between nearby echoes. Opening removes isolated noise points.
+        if (morph_close_radius_ > 0) {
+            int kernel_size = 2 * morph_close_radius_ + 1;
+            cv::Mat kernel = cv::getStructuringElement(
+                cv::MORPH_RECT, cv::Size(kernel_size, kernel_size));
+            cv::morphologyEx(valid_mask, valid_mask, cv::MORPH_CLOSE, kernel);
+        }
+
+        if (morph_open_radius_ > 0) {
+            int kernel_size = 2 * morph_open_radius_ + 1;
+            cv::Mat kernel = cv::getStructuringElement(
+                cv::MORPH_RECT, cv::Size(kernel_size, kernel_size));
+            cv::morphologyEx(valid_mask, valid_mask, cv::MORPH_OPEN, kernel);
+        }
+
+        // Cache the filtered grid for the image timer — pixels that fail the
+        // threshold/mask are zeroed so the polar image matches what enters the point cloud.
+        {
+            cv::Mat display = sonar_image.clone();
+            cv::Mat invalid_mask;
+            cv::bitwise_not(valid_mask, invalid_mask);
+            display.setTo(0.0f, invalid_mask);
+            
+            std::lock_guard<std::mutex> lock(grid_mutex_);
+            latest_intensity_grid_ = display;
+            latest_stamp_ = img_msg->header.stamp;
+        }
+
         std::vector<std::vector<pcl::PointXYZI>> points_by_beam(cols);
 
         for (int c = 0; c < cols; c++) {
@@ -457,13 +556,11 @@ private:
             const double sb = beam_trig[c].sin_b;
 
             for (int r = 0; r < rows; r++) {
-                float intensity = sonar_image.at<float>(r, c);
-                double range = min_range_ + (r * range_res);
-
-                if ((range < 3.0 && intensity < min_intensity_short_range_) ||
-                    (range >= 3.0 && intensity < min_intensity_long_range_)) {
+                if (valid_mask.at<uint8_t>(r, c) == 0) {
                     continue;
                 }
+
+                double range = min_range_ + (r * range_res);
 
                 for (int k = 0; k < n_arc; k++) {
                     const double ce = elev_trig[k].cos_e;

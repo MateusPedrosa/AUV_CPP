@@ -11,6 +11,7 @@ endif()
 
 # --- Find Dependencies ---
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -178,6 +179,11 @@ install(DIRECTORY include/
 # Install Launch, Config, RViz
 install(DIRECTORY launch rviz config
   DESTINATION share/${PROJECT_NAME}
+)
+
+# Install Python scripts
+install(PROGRAMS scripts/mimosa_tf_converter.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 # --- Export for downstream packages ---

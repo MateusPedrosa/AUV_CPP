@@ -154,6 +154,33 @@ def generate_launch_description():
         arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
     )
 
+    # BlueROV — convert /mimosa_node/graph/transform to /tf
+    mimosa_tf_converter_node = Node(
+        package='nbv_planner',
+        executable='mimosa_tf_converter.py',
+        output='screen',
+        condition=IfCondition(PythonExpression([
+            "'true' if '", LaunchConfiguration('sonar'), "' == 'bluerov' else 'false'"
+        ])),
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    )
+
+    # BlueROV — bridge mimosa_body (MIMOSA robot frame) to base_link so the TF tree is connected
+    static_transform_mimosa_body_to_base_link = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments=[
+            '--x', '0.0', '--y', '0.0', '--z', '0.0',
+            '--roll', '0.0', '--pitch', '0.0', '--yaw', '0.0',
+            '--frame-id', 'mimosa_body',
+            '--child-frame-id', 'base_link',
+        ],
+        condition=IfCondition(PythonExpression([
+            "'true' if '", LaunchConfiguration('sonar'), "' == 'bluerov' else 'false'"
+        ])),
+        parameters=[{'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    )
+
     return LaunchDescription([
         # Declare arguments
         declare_sonar,
@@ -168,8 +195,10 @@ def generate_launch_description():
         rviz_node,
         static_transform_publisher_forward_camera_node,
         static_transform_publisher_bottom_camera_node,
-        sonar_point_cloud_node,
+        # sonar_point_cloud_node,
         sonar_point_cloud_oceansim_node,
         sonar_point_cloud_bluerov_node,
         sonar_tf_publisher_node,
+        mimosa_tf_converter_node,
+        static_transform_mimosa_body_to_base_link,
     ])
