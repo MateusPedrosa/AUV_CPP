@@ -33,8 +33,12 @@ public:
             std::bind(&SonarTfPublisher::rollCallback, this, std::placeholders::_1)
         );
 
-        // Publish at 50 Hz so TF never goes stale, even if the servo is slow
-        timer_ = this->create_wall_timer(
+        // Publish at 50 Hz. rclcpp::create_timer uses the node's clock, so this
+        // respects use_sim_time:=true and fires in sync with the sim clock when
+        // replaying bags with ros2 bag play --clock.
+        timer_ = rclcpp::create_timer(
+            this,
+            this->get_clock(),
             std::chrono::milliseconds(20),
             std::bind(&SonarTfPublisher::publishTransform, this)
         );

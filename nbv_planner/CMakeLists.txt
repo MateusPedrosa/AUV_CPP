@@ -182,7 +182,9 @@ install(DIRECTORY launch rviz config
 )
 
 # Install Python scripts
-install(PROGRAMS scripts/mimosa_tf_converter.py
+install(PROGRAMS
+  scripts/mimosa_tf_converter.py
+  scripts/odom_to_tf.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -2,7 +2,6 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
 #include <pcl_conversions/pcl_conversions.h>
-#include "tf2_ros/create_timer_ros.h"
 
 namespace nbv_planner {
 
@@ -70,33 +69,17 @@ NBVPlannerNode::NBVPlannerNode()
     nbv_planner_->setParameters(octomap_params.sensor_max_range, M_PI/2, M_PI/3, 8, 3);
     
     // Initialize TF2
-    std::chrono::milliseconds buffer_timeout(100); // 100 ms timeout for TF2 lookups
     tf2_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-    auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
-        this->get_node_base_interface(),
-        this->get_node_timers_interface());
-    tf2_buffer_->setCreateTimerInterface(timer_interface);
     tf2_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer_);
 
     auto qos = rclcpp::QoS(rclcpp::KeepLast(10));
     qos.reliability(rclcpp::ReliabilityPolicy::BestEffort);
-    
-    // Setup the subscriber
-    point_cloud_sub_.subscribe(this, "cloud_in", qos.get_rmw_qos_profile());
 
-    // Setup the filter to wait for the transform between the cloud's frame and map_frame
-    tf_filter_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
-        point_cloud_sub_,
-        *tf2_buffer_,
-        map_frame_,      // The frame we need the transform TO
-        10,              // Queue size
-        this->get_node_logging_interface(),
-        this->get_node_clock_interface(),
-        std::chrono::milliseconds(100) // How long to wait for the TF to arrive
-    );
-
-    // Register the callback
-    tf_filter_->registerCallback(&NBVPlannerNode::pointCloudCallback, this);
+    // Direct subscription — TF is looked up with TimePointZero (latest available)
+    // inside the callback, so we never block on timestamp matching.
+    point_cloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+        "cloud_in", qos,
+        std::bind(&NBVPlannerNode::pointCloudCallback, this, std::placeholders::_1));
     
     // Create publishers
     goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>(
@@ -110,7 +93,9 @@ NBVPlannerNode::NBVPlannerNode()
     
     // Create timer for planning
     auto period = std::chrono::duration<double>(1.0 / planning_frequency_);
-    planning_timer_ = this->create_wall_timer(
+    planning_timer_ = rclcpp::create_timer(
+        this,
+        this->get_clock(),
         std::chrono::duration_cast<std::chrono::milliseconds>(period),
         std::bind(&NBVPlannerNode::planningTimerCallback, this));
     
@@ -384,12 +369,14 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
         return;
     }
     try {
-        // Get transform from exploration sensor to map frame
+        // Get transform from exploration sensor to map frame.
+        // TimePointZero = latest available transform, so this never fails due to
+        // timestamp mismatches between the cloud and the TF tree.
         geometry_msgs::msg::TransformStamped t_exploration_sensor;
         t_exploration_sensor = tf2_buffer_->lookupTransform(
             map_frame_,
-            msg->header.frame_id, // Point cloud should be published in the exploration sensor frame
-            msg->header.stamp);
+            msg->header.frame_id,
+            tf2::TimePointZero);
         // Convert to Eigen transform
         Eigen::Isometry3d T_G_exploration_sensor = tf2::transformToEigen(t_exploration_sensor);
 
@@ -407,7 +394,7 @@ void NBVPlannerNode::pointCloudCallback(const sensor_msgs::msg::PointCloud2::Sha
             t_inspection_sensor = tf2_buffer_->lookupTransform(
                 map_frame_,
                 inspection_sensor_frame,
-                msg->header.stamp);
+                tf2::TimePointZero);
             // Convert to Eigen transform
             Eigen::Isometry3d T_G_inspection_sensor = tf2::transformToEigen(t_inspection_sensor);
 

@@ -1,8 +1,8 @@
 # NBV Planner Parameters — BlueROV + Sonoptix ECHO
 nbv_planner_node:
   ros__parameters:
-    map_frame: "mimosa_map"
-    robot_frame: "mimosa_body"
+    map_frame: "map"
+    robot_frame: "base_link"
     octree_resolution: 0.2
     planning_frequency: 0.5
     exploration_sensor_max_range: 12.0
@@ -50,7 +50,7 @@ sonar_tf_publisher:
   ros__parameters:
     pitch_topic: "/servo/pitch_angle"
     sonar_frame: "sonar_link"
-    robot_frame: "mimosa_body"
+    robot_frame: "base_link"
     translation_x: 0.3
     translation_y: 0.0
     translation_z: 0.3

@@ -109,12 +109,12 @@ public:
             std::bind(&SonarPointCloud::convertImageToPointCloud, this, _1)
         );
 
-        if (image_hz > 0.0) {
-            auto period = std::chrono::duration<double>(1.0 / image_hz);
-            image_timer_ = this->create_wall_timer(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(period),
-                std::bind(&SonarPointCloud::publishPolarImage, this));
-        }
+        // if (image_hz > 0.0) {
+        //     auto period = std::chrono::duration<double>(1.0 / image_hz);
+        //     image_timer_ = this->create_wall_timer(
+        //         std::chrono::duration_cast<std::chrono::nanoseconds>(period),
+        //         std::bind(&SonarPointCloud::publishPolarImage, this));
+        // }
     }
 
 private:
@@ -400,6 +400,10 @@ private:
     }
 
     void convertImageToPointCloud(const sensor_msgs::msg::Image::ConstSharedPtr & img_msg) {
+        using Clock = std::chrono::steady_clock;
+        using us    = std::chrono::microseconds;
+        auto t0 = Clock::now();
+
         // Convert ROS Image to OpenCV Mat.
         // The Sonoptix ECHO driver publishes mono8 (uint8, 0-255). Decode as MONO8 then
         // normalise to [0,1] so all downstream thresholds stay in the same scale.
@@ -410,6 +414,7 @@ private:
             RCLCPP_ERROR(this->get_logger(), "cv_bridge exception: %s", e.what());
             return;
         }
+        auto t_copy = Clock::now();
 
         cv::Mat sonar_image;
         cv_ptr->image.convertTo(sonar_image, CV_32F, 1.0 / 255.0);
@@ -433,6 +438,7 @@ private:
             cv::medianBlur(grid_8u, grid_8u, median_blur_size_);
             grid_8u.convertTo(sonar_image, CV_32F, 1.0 / 255.0);
         }
+        auto t_median = Clock::now();
 
         int rows = sonar_image.rows;
         int cols = sonar_image.cols;
@@ -467,9 +473,9 @@ private:
 
         // ---- Step 2: Sauvola Adaptive Thresholding (optional) ----
         // T(r,c) = mean(r,c) * (1 + k * (std(r,c) / R - 1))
-        // Disabled when sauvola_window_size == 0; falls back to fixed per-range thresholds.
+        // window <= 1 → std=0 everywhere → threshold=0 → only min_thresh matters; skip to fixed path.
         cv::Mat valid_mask;
-        if (sauvola_window_size_ > 0) {
+        if (sauvola_window_size_ > 1) {
             cv::Size ksize(sauvola_window_size_, sauvola_window_size_);
 
             cv::Mat mean_mat;
@@ -496,12 +502,9 @@ private:
                 float alpha = static_cast<float>(r) / std::max(1, sonar_image.rows - 1);
                 float min_thresh = min_intensity_short_range_ * (1.0f - alpha) +
                                    min_intensity_long_range_ * alpha;
-
-                for (int c = 0; c < sonar_image.cols; c++) {
-                    if (sauvola_thresh.at<float>(r, c) < min_thresh) {
-                        sauvola_thresh.at<float>(r, c) = min_thresh;
-                    }
-                }
+                float* p   = sauvola_thresh.ptr<float>(r);
+                float* end = p + sonar_image.cols;
+                while (p < end) { if (*p < min_thresh) *p = min_thresh; ++p; }
             }
 
             cv::compare(sonar_image, sauvola_thresh, valid_mask, cv::CMP_GE);
@@ -518,6 +521,8 @@ private:
                 }
             }
         }
+
+        auto t_thresh = Clock::now();
 
         // ---- Step 3 & 4: Morphological Closing & Opening (Binary) ----
         // Clean up the binary mask of valid returns.
@@ -536,6 +541,8 @@ private:
             cv::morphologyEx(valid_mask, valid_mask, cv::MORPH_OPEN, kernel);
         }
 
+        auto t_morph = Clock::now();
+
         // Cache the filtered grid for the image timer — pixels that fail the
         // threshold/mask are zeroed so the polar image matches what enters the point cloud.
         {
@@ -543,7 +550,7 @@ private:
             cv::Mat invalid_mask;
             cv::bitwise_not(valid_mask, invalid_mask);
             display.setTo(0.0f, invalid_mask);
-            
+
             std::lock_guard<std::mutex> lock(grid_mutex_);
             latest_intensity_grid_ = display;
             latest_stamp_ = img_msg->header.stamp;
@@ -551,16 +558,16 @@ private:
 
         std::vector<std::vector<pcl::PointXYZI>> points_by_beam(cols);
 
-        for (int c = 0; c < cols; c++) {
-            const double cb = beam_trig[c].cos_b;
-            const double sb = beam_trig[c].sin_b;
+        // Row-major traversal: sequential reads of valid_mask rows (cache-friendly).
+        for (int r = 0; r < rows; r++) {
+            const uint8_t* mask_row = valid_mask.ptr<uint8_t>(r);
+            const double range = min_range_ + (r * range_res);
 
-            for (int r = 0; r < rows; r++) {
-                if (valid_mask.at<uint8_t>(r, c) == 0) {
-                    continue;
-                }
+            for (int c = 0; c < cols; c++) {
+                if (mask_row[c] == 0) continue;
 
-                double range = min_range_ + (r * range_res);
+                const double cb = beam_trig[c].cos_b;
+                const double sb = beam_trig[c].sin_b;
 
                 for (int k = 0; k < n_arc; k++) {
                     const double ce = elev_trig[k].cos_e;
@@ -574,6 +581,8 @@ private:
                 }
             }
         }
+
+        auto t_pcl_gen = Clock::now();
 
         // For beams with no returns, insert a sentinel point just beyond max_range.
         // OctoMap treats the voxels along a ray up to (but not including) the endpoint
@@ -705,12 +714,31 @@ private:
         // Publish filtered point cloud
         if (!filtered_cloud.empty()) {
             sensor_msgs::msg::PointCloud2 output_msg;
+            auto t_toROS_start = Clock::now();
             pcl::toROSMsg(filtered_cloud, output_msg);
+            auto t_toROS_end = Clock::now();
             output_msg.header.frame_id = "sonar_link";
-            output_msg.header.stamp = img_msg->header.stamp;
+            // Use the node clock (not the bag message timestamp) so the cloud shares
+            // the same time base as sonar_tf_publisher and the MIMOSA TF.
+            // With use_sim_time:=true + bag --clock this equals sim time ≈ bag time.
+            // With use_sim_time:=false (default) this equals wall clock, which is
+            // consistent with all other live nodes.
+            output_msg.header.stamp = this->now();
 
             point_cloud_pub_->publish(output_msg);
-            RCLCPP_DEBUG(this->get_logger(), "Published point cloud with %zu points", filtered_cloud.size());
+            auto t_end = Clock::now();
+
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                "Timing(us) toCvCopy=%ld  median=%ld  thresh=%ld  morph=%ld  pcl_gen=%ld  toROS=%ld  publish=%ld  TOTAL=%ld  pts=%zu",
+                std::chrono::duration_cast<us>(t_copy    - t0        ).count(),
+                std::chrono::duration_cast<us>(t_median  - t_copy    ).count(),
+                std::chrono::duration_cast<us>(t_thresh  - t_median  ).count(),
+                std::chrono::duration_cast<us>(t_morph   - t_thresh  ).count(),
+                std::chrono::duration_cast<us>(t_pcl_gen - t_morph   ).count(),
+                std::chrono::duration_cast<us>(t_toROS_end - t_toROS_start).count(),
+                std::chrono::duration_cast<us>(t_end     - t_toROS_end).count(),
+                std::chrono::duration_cast<us>(t_end     - t0        ).count(),
+                filtered_cloud.size());
         } else {
             RCLCPP_WARN(this->get_logger(), "Point cloud is empty, nothing to publish.");
         }

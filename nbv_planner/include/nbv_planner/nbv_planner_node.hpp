@@ -2,8 +2,6 @@
 #define NBV_PLANNER_NBV_PLANNER_NODE_HPP
 
 #include <rclcpp/rclcpp.hpp>
-#include <message_filters/subscriber.h>
-#include <tf2_ros/message_filter.h>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -41,8 +39,7 @@ private:
     std::unique_ptr<SimplePlanner> path_planner_;
     
     // ROS interfaces
-    message_filters::Subscriber<sensor_msgs::msg::PointCloud2> point_cloud_sub_;
-    std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>> tf_filter_;
+    rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_sub_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_pub_;
     rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr candidates_pub_;

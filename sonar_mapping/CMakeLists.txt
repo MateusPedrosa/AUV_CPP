@@ -21,22 +21,34 @@ find_package(tf2_ros REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(blueye_interfaces REQUIRED)
 
-add_executable(sonar_point_cloud src/sonar_point_cloud.cpp)
-target_include_directories(sonar_point_cloud PUBLIC
-  ${PCL_INCLUDE_DIRS}
-)
-target_link_libraries(sonar_point_cloud
-  ${PCL_LIBRARIES}
+# add_executable(sonar_point_cloud src/sonar_point_cloud.cpp)
+# target_include_directories(sonar_point_cloud PUBLIC
+#   ${PCL_INCLUDE_DIRS}
+# )
+# target_link_libraries(sonar_point_cloud
+#   ${PCL_LIBRARIES}
+#   ${OpenCV_LIBRARIES}
+#   oculus_interfaces_blueye::oculus_interfaces_blueye__rosidl_typesupport_cpp
+# )
+# ament_target_dependencies(sonar_point_cloud
+#   rclcpp
+#   sensor_msgs
+#   geometry_msgs
+#   cv_bridge
+#   pcl_conversions
+#   #message_filters
+# )
+
+add_executable(sonar_fan_image src/sonar_fan_image.cpp)
+target_link_libraries(sonar_fan_image
   ${OpenCV_LIBRARIES}
-  oculus_interfaces_blueye::oculus_interfaces_blueye__rosidl_typesupport_cpp
 )
-ament_target_dependencies(sonar_point_cloud
+ament_target_dependencies(sonar_fan_image
   rclcpp
   sensor_msgs
-  geometry_msgs
+  std_msgs
   cv_bridge
-  pcl_conversions
-  #message_filters
+  oculus_interfaces_blueye
 )
 
 add_executable(sonar_tf_publisher src/sonar_tf_publisher.cpp)
@@ -95,10 +107,11 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS
-  sonar_point_cloud
+  # sonar_point_cloud
   sonar_point_cloud_oceansim
   sonar_point_cloud_bluerov
   sonar_tf_publisher
+  sonar_fan_image
   DESTINATION lib/${PROJECT_NAME}
 )
 

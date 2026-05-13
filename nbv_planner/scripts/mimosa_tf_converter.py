@@ -20,6 +20,10 @@ class MimosaTFConverter(Node):
         self.get_logger().info('TF Converter Node started. Listening to /mimosa_node/graph/transform...')
 
     def transform_callback(self, msg: TransformStamped):
+        # Re-stamp with the node clock so MIMOSA TF shares the same time base as
+        # sonar_tf_publisher and the static transforms (wall clock or sim clock).
+        # Using the original bag timestamp causes a ~543-second jump-back that clears
+        # the TF buffer and breaks the transform chain.
         msg.header.stamp = self.get_clock().now().to_msg()
         tf_msg = TFMessage()
         tf_msg.transforms.append(msg)
